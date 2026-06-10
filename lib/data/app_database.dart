@@ -1,3 +1,5 @@
+import 'dart:math';
+
 import 'package:path/path.dart' as p;
 import 'package:sqflite/sqflite.dart';
 
@@ -28,7 +30,7 @@ class AppDatabase {
 
     return openDatabase(
       path,
-      version: 1,
+      version: 3,
       onConfigure: (db) async {
         await db.execute('PRAGMA foreign_keys = ON');
       },
@@ -43,30 +45,102 @@ CREATE TABLE poem_collections (
 )
 ''');
 
-        await db.execute('''
-CREATE TABLE poems (
+        await _createPoemElementTables(db);
+      },
+      onUpgrade: (db, oldVersion, newVersion) async {
+        if (oldVersion < 2) {
+          await db.execute(
+            "ALTER TABLE poems ADD COLUMN annotation TEXT NOT NULL DEFAULT ''",
+          );
+          await db.execute(
+            "ALTER TABLE poems ADD COLUMN appreciation TEXT NOT NULL DEFAULT ''",
+          );
+        }
+        if (oldVersion < 3) {
+          await _migratePoemsToElements(db);
+        }
+      },
+    );
+  }
+
+  Future<void> _createPoemElementTables(DatabaseExecutor db) async {
+    await db.execute('''
+CREATE TABLE poem_elements (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
-  collection_id INTEGER NOT NULL,
+  identity TEXT NOT NULL UNIQUE,
   title TEXT NOT NULL,
   author TEXT NOT NULL,
   dynasty TEXT NOT NULL DEFAULT '',
   content TEXT NOT NULL,
   remark TEXT NOT NULL DEFAULT '',
+  annotation TEXT NOT NULL DEFAULT '',
+  appreciation TEXT NOT NULL DEFAULT '',
   created_at INTEGER NOT NULL,
-  updated_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL
+)
+''');
+
+    await db.execute('''
+CREATE TABLE collection_poems (
+  collection_id INTEGER NOT NULL,
+  poem_id INTEGER NOT NULL,
+  created_at INTEGER NOT NULL,
+  PRIMARY KEY (collection_id, poem_id),
   FOREIGN KEY (collection_id)
     REFERENCES poem_collections (id)
+    ON DELETE CASCADE,
+  FOREIGN KEY (poem_id)
+    REFERENCES poem_elements (id)
     ON DELETE CASCADE
 )
 ''');
 
-        await db.execute(
-          'CREATE INDEX idx_poems_collection_id ON poems(collection_id)',
-        );
-        await db.execute('CREATE INDEX idx_poems_title ON poems(title)');
-        await db.execute('CREATE INDEX idx_poems_author ON poems(author)');
-      },
+    await db.execute(
+      'CREATE INDEX idx_collection_poems_collection_id '
+      'ON collection_poems(collection_id)',
     );
+    await db.execute(
+      'CREATE INDEX idx_collection_poems_poem_id '
+      'ON collection_poems(poem_id)',
+    );
+    await db.execute(
+      'CREATE INDEX idx_poem_elements_title ON poem_elements(title)',
+    );
+    await db.execute(
+      'CREATE INDEX idx_poem_elements_author ON poem_elements(author)',
+    );
+  }
+
+  Future<void> _migratePoemsToElements(Database db) async {
+    await _createPoemElementTables(db);
+
+    final oldPoems = await db.query('poems', orderBy: 'id ASC');
+    for (final oldPoem in oldPoems) {
+      final oldId = oldPoem['id'] as int;
+      final collectionId = oldPoem['collection_id'] as int;
+      final createdAt = _intFromMap(oldPoem['created_at']);
+
+      final poemId = await db.insert('poem_elements', {
+        'identity': _legacyPoemIdentity(oldId, createdAt),
+        'title': oldPoem['title'],
+        'author': oldPoem['author'],
+        'dynasty': oldPoem['dynasty'] ?? '',
+        'content': oldPoem['content'],
+        'remark': oldPoem['remark'] ?? '',
+        'annotation': oldPoem['annotation'] ?? '',
+        'appreciation': oldPoem['appreciation'] ?? '',
+        'created_at': createdAt,
+        'updated_at': _intFromMap(oldPoem['updated_at']),
+      });
+
+      await db.insert('collection_poems', {
+        'collection_id': collectionId,
+        'poem_id': poemId,
+        'created_at': createdAt,
+      });
+    }
+
+    await db.execute('DROP TABLE poems');
   }
 
   Future<List<PoemCollection>> getCollections() async {
@@ -110,7 +184,10 @@ CREATE TABLE poems (
 
   Future<void> deleteCollection(int id) async {
     final db = await database;
-    await db.delete('poem_collections', where: 'id = ?', whereArgs: [id]);
+    await db.transaction((txn) async {
+      await txn.delete('poem_collections', where: 'id = ?', whereArgs: [id]);
+      await _deleteOrphanedPoems(txn);
+    });
   }
 
   Future<List<Poem>> getPoems(int collectionId, {String query = ''}) async {
@@ -118,29 +195,37 @@ CREATE TABLE poems (
     final keyword = query.trim();
 
     if (keyword.isEmpty) {
-      final rows = await db.query(
-        'poems',
-        where: 'collection_id = ?',
-        whereArgs: [collectionId],
-        orderBy: 'updated_at DESC, title ASC',
+      final rows = await db.rawQuery(
+        '''
+SELECT pe.*, cp.collection_id
+FROM poem_elements pe
+INNER JOIN collection_poems cp ON cp.poem_id = pe.id
+WHERE cp.collection_id = ?
+ORDER BY pe.updated_at DESC, pe.title ASC
+''',
+        [collectionId],
       );
       return rows.map(Poem.fromMap).toList();
     }
 
     final like = '%$keyword%';
-    final rows = await db.query(
-      'poems',
-      where: '''
-collection_id = ?
+    final rows = await db.rawQuery(
+      '''
+SELECT pe.*, cp.collection_id
+FROM poem_elements pe
+INNER JOIN collection_poems cp ON cp.poem_id = pe.id
+WHERE cp.collection_id = ?
 AND (
-  title LIKE ?
-  OR author LIKE ?
-  OR content LIKE ?
-  OR remark LIKE ?
+  pe.title LIKE ?
+  OR pe.author LIKE ?
+  OR pe.content LIKE ?
+  OR pe.remark LIKE ?
+  OR pe.annotation LIKE ?
+  OR pe.appreciation LIKE ?
 )
+ORDER BY pe.updated_at DESC, pe.title ASC
 ''',
-      whereArgs: [collectionId, like, like, like, like],
-      orderBy: 'updated_at DESC, title ASC',
+      [collectionId, like, like, like, like, like, like],
     );
     return rows.map(Poem.fromMap).toList();
   }
@@ -152,21 +237,35 @@ AND (
     required String dynasty,
     required String content,
     String remark = '',
+    String annotation = '',
+    String appreciation = '',
   }) async {
     final now = DateTime.now();
+    final createdAt = now.millisecondsSinceEpoch;
     final poem = Poem(
       collectionId: collectionId,
+      identity: _generatePoemIdentity(),
       title: title.trim(),
       author: author.trim(),
       dynasty: dynasty.trim(),
       content: content.trim(),
       remark: remark.trim(),
+      annotation: annotation.trim(),
+      appreciation: appreciation.trim(),
       createdAt: now,
       updatedAt: now,
     );
 
     final db = await database;
-    final id = await db.insert('poems', poem.toMap());
+    final id = await db.transaction<int>((txn) async {
+      final poemId = await txn.insert('poem_elements', poem.toElementMap());
+      await txn.insert('collection_poems', {
+        'collection_id': collectionId,
+        'poem_id': poemId,
+        'created_at': createdAt,
+      });
+      return poemId;
+    });
     await _touchCollection(collectionId);
     return id;
   }
@@ -180,8 +279,8 @@ AND (
     final updatedPoem = poem.copyWith(updatedAt: DateTime.now());
     final db = await database;
     await db.update(
-      'poems',
-      updatedPoem.toMap(),
+      'poem_elements',
+      updatedPoem.toElementMap(),
       where: 'id = ?',
       whereArgs: [id],
     );
@@ -194,9 +293,86 @@ AND (
       return;
     }
 
+    await removePoemsFromCollection(
+      collectionId: poem.collectionId,
+      poemIds: [id],
+    );
+  }
+
+  Future<List<int>> addPoemsToCollection({
+    required int collectionId,
+    required Iterable<int> poemIds,
+  }) async {
     final db = await database;
-    await db.delete('poems', where: 'id = ?', whereArgs: [id]);
-    await _touchCollection(poem.collectionId);
+    final now = DateTime.now().millisecondsSinceEpoch;
+    final uniquePoemIds = poemIds.toSet();
+    final addedPoemIds = <int>[];
+
+    await db.transaction((txn) async {
+      for (final poemId in uniquePoemIds) {
+        final poemRows = await txn.query(
+          'poem_elements',
+          columns: ['id'],
+          where: 'id = ?',
+          whereArgs: [poemId],
+          limit: 1,
+        );
+        if (poemRows.isEmpty) {
+          continue;
+        }
+
+        final relationRows = await txn.query(
+          'collection_poems',
+          columns: ['poem_id'],
+          where: 'collection_id = ? AND poem_id = ?',
+          whereArgs: [collectionId, poemId],
+          limit: 1,
+        );
+        if (relationRows.isNotEmpty) {
+          continue;
+        }
+
+        await txn.insert(
+          'collection_poems',
+          {
+            'collection_id': collectionId,
+            'poem_id': poemId,
+            'created_at': now,
+          },
+        );
+        addedPoemIds.add(poemId);
+      }
+    });
+
+    if (addedPoemIds.isNotEmpty) {
+      await _touchCollection(collectionId);
+    }
+    return addedPoemIds;
+  }
+
+  Future<int> removePoemsFromCollection({
+    required int collectionId,
+    required Iterable<int> poemIds,
+  }) async {
+    final db = await database;
+    final uniquePoemIds = poemIds.toSet();
+    var removedCount = 0;
+
+    await db.transaction((txn) async {
+      for (final poemId in uniquePoemIds) {
+        removedCount += await txn.delete(
+          'collection_poems',
+          where: 'collection_id = ? AND poem_id = ?',
+          whereArgs: [collectionId, poemId],
+        );
+        await _deletePoemIfOrphaned(txn, poemId);
+      }
+    });
+
+    if (removedCount > 0) {
+      await _touchCollection(collectionId);
+    }
+    return removedCount;
   }
 
   Future<void> _touchCollection(int collectionId) async {
@@ -208,4 +384,61 @@ AND (
       whereArgs: [collectionId],
     );
   }
+
+  Future<void> _deletePoemIfOrphaned(DatabaseExecutor db, int poemId) async {
+    final countRows = await db.rawQuery(
+      'SELECT COUNT(*) FROM collection_poems WHERE poem_id = ?',
+      [poemId],
+    );
+    final remainingReferences = Sqflite.firstIntValue(countRows) ?? 0;
+    if (remainingReferences == 0) {
+      await db.delete('poem_elements', where: 'id = ?', whereArgs: [poemId]);
+    }
+  }
+
+  Future<void> _deleteOrphanedPoems(DatabaseExecutor db) async {
+    await db.execute('''
+DELETE FROM poem_elements
+WHERE id NOT IN (
+  SELECT poem_id FROM collection_poems
+)
+''');
+  }
+}
+
+final _poemIdentityRandom = Random.secure();
+
+String _generatePoemIdentity() {
+  final bytes = List<int>.generate(
+    16,
+    (_) => _poemIdentityRandom.nextInt(256),
+  );
+  bytes[6] = (bytes[6] & 0x0f) | 0x40;
+  bytes[8] = (bytes[8] & 0x3f) | 0x80;
+
+  final hex = bytes
+      .map((byte) => byte.toRadixString(16).padLeft(2, '0'))
+      .join();
+
+  return [
+    hex.substring(0, 8),
+    hex.substring(8, 12),
+    hex.substring(12, 16),
+    hex.substring(16, 20),
+    hex.substring(20),
+  ].join('-');
+}
+
+String _legacyPoemIdentity(int oldId, int createdAt) {
+  return 'legacy-$createdAt-$oldId';
+}
+
+int _intFromMap(Object? value) {
+  if (value is int) {
+    return value;
+  }
+  if (value is String) {
+    return int.tryParse(value) ?? DateTime.now().millisecondsSinceEpoch;
+  }
+  return DateTime.now().millisecondsSinceEpoch;
 }

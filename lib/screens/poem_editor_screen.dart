@@ -20,6 +20,8 @@ class _PoemEditorScreenState extends State<PoemEditorScreen> {
   late final TextEditingController _dynastyController;
   late final TextEditingController _contentController;
   late final TextEditingController _remarkController;
+  late final TextEditingController _annotationController;
+  late final TextEditingController _appreciationController;
   bool _saving = false;
 
   bool get _isEditing => widget.poem != null;
@@ -33,6 +35,8 @@ class _PoemEditorScreenState extends State<PoemEditorScreen> {
     _dynastyController = TextEditingController(text: poem?.dynasty);
     _contentController = TextEditingController(text: poem?.content);
     _remarkController = TextEditingController(text: poem?.remark);
+    _annotationController = TextEditingController(text: poem?.annotation);
+    _appreciationController = TextEditingController(text: poem?.appreciation);
   }
 
   @override
@@ -42,6 +46,8 @@ class _PoemEditorScreenState extends State<PoemEditorScreen> {
     _dynastyController.dispose();
     _contentController.dispose();
     _remarkController.dispose();
+    _annotationController.dispose();
+    _appreciationController.dispose();
     super.dispose();
   }
 
@@ -65,6 +71,8 @@ class _PoemEditorScreenState extends State<PoemEditorScreen> {
         dynasty: _dynastyController.text,
         content: _contentController.text,
         remark: _remarkController.text,
+        annotation: _annotationController.text,
+        appreciation: _appreciationController.text,
       );
     } else {
       await database.updatePoem(
@@ -74,6 +82,8 @@ class _PoemEditorScreenState extends State<PoemEditorScreen> {
           dynasty: _dynastyController.text.trim(),
           content: _contentController.text.trim(),
           remark: _remarkController.text.trim(),
+          annotation: _annotationController.text.trim(),
+          appreciation: _appreciationController.text.trim(),
         ),
       );
     }
@@ -151,6 +161,30 @@ class _PoemEditorScreenState extends State<PoemEditorScreen> {
                 maxLines: 16,
                 keyboardType: TextInputType.multiline,
                 validator: _required('请输入诗词内容'),
+              ),
+              const SizedBox(height: 12),
+              TextFormField(
+                controller: _annotationController,
+                decoration: const InputDecoration(
+                  labelText: '注释',
+                  hintText: '记录字词释义、典故、出处等',
+                  alignLabelWithHint: true,
+                ),
+                minLines: 4,
+                maxLines: 8,
+                keyboardType: TextInputType.multiline,
+              ),
+              const SizedBox(height: 12),
+              TextFormField(
+                controller: _appreciationController,
+                decoration: const InputDecoration(
+                  labelText: '赏析',
+                  hintText: '记录主题、情感、手法和个人理解',
+                  alignLabelWithHint: true,
+                ),
+                minLines: 4,
+                maxLines: 8,
+                keyboardType: TextInputType.multiline,
               ),
               const SizedBox(height: 20),
               FilledButton.icon(

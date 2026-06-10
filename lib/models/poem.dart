@@ -1,59 +1,73 @@
 class Poem {
   const Poem({
     this.id,
+    required this.identity,
     required this.collectionId,
     required this.title,
     required this.author,
     required this.dynasty,
     required this.content,
     this.remark = '',
+    this.annotation = '',
+    this.appreciation = '',
     required this.createdAt,
     required this.updatedAt,
   });
 
   final int? id;
+  final String identity;
   final int collectionId;
   final String title;
   final String author;
   final String dynasty;
   final String content;
   final String remark;
+  final String annotation;
+  final String appreciation;
   final DateTime createdAt;
   final DateTime updatedAt;
 
   Poem copyWith({
     int? id,
+    String? identity,
     int? collectionId,
     String? title,
     String? author,
     String? dynasty,
     String? content,
     String? remark,
+    String? annotation,
+    String? appreciation,
     DateTime? createdAt,
     DateTime? updatedAt,
   }) {
     return Poem(
       id: id ?? this.id,
+      identity: identity ?? this.identity,
       collectionId: collectionId ?? this.collectionId,
       title: title ?? this.title,
       author: author ?? this.author,
       dynasty: dynasty ?? this.dynasty,
       content: content ?? this.content,
       remark: remark ?? this.remark,
+      annotation: annotation ?? this.annotation,
+      appreciation: appreciation ?? this.appreciation,
       createdAt: createdAt ?? this.createdAt,
       updatedAt: updatedAt ?? this.updatedAt,
     );
   }
 
-  Map<String, Object?> toMap() {
+  Map<String, Object?> toElementMap({bool includeId = false}) {
     return {
-      if (id != null) 'id': id,
-      'collection_id': collectionId,
+      if (includeId && id != null) 'id': id,
+      'identity': identity,
       'title': title,
       'author': author,
       'dynasty': dynasty,
       'content': content,
       'remark': remark,
+      'annotation': annotation,
+      'appreciation': appreciation,
       'created_at': createdAt.millisecondsSinceEpoch,
       'updated_at': updatedAt.millisecondsSinceEpoch,
     };
@@ -62,12 +76,15 @@ class Poem {
   factory Poem.fromMap(Map<String, Object?> map) {
     return Poem(
       id: map['id'] as int?,
+      identity: map['identity'] as String,
       collectionId: map['collection_id'] as int,
       title: map['title'] as String,
       author: map['author'] as String,
       dynasty: (map['dynasty'] as String?) ?? '',
       content: map['content'] as String,
       remark: (map['remark'] as String?) ?? '',
+      annotation: (map['annotation'] as String?) ?? '',
+      appreciation: (map['appreciation'] as String?) ?? '',
       createdAt: _dateFromMap(map['created_at']),
       updatedAt: _dateFromMap(map['updated_at']),
     );

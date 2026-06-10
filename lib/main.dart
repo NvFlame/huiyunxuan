@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 
-import 'screens/collection_list_screen.dart';
+import 'screens/home_screen.dart';
 
 const appTitle = '绘云轩';
 
@@ -64,7 +64,7 @@ class HuiyunxuanApp extends StatelessWidget {
           ),
         ),
       ),
-      home: const CollectionListScreen(),
+      home: const HomeScreen(),
     );
   }
 }

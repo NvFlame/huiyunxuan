@@ -110,7 +110,7 @@ class _CollectionListScreenState extends State<CollectionListScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('绘云轩')),
+      appBar: AppBar(title: const Text('诗词库管理')),
       body: FutureBuilder<List<PoemCollection>>(
         future: _collectionsFuture,
         builder: (context, snapshot) {
