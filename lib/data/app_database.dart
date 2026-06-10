@@ -3,6 +3,7 @@ import 'dart:math';
 import 'package:path/path.dart' as p;
 import 'package:sqflite/sqflite.dart';
 
+import '../models/api_config.dart';
 import '../models/poem.dart';
 import '../models/poem_collection.dart';
 
@@ -30,7 +31,7 @@ class AppDatabase {
 
     return openDatabase(
       path,
-      version: 3,
+      version: 4,
       onConfigure: (db) async {
         await db.execute('PRAGMA foreign_keys = ON');
       },
@@ -46,6 +47,7 @@ CREATE TABLE poem_collections (
 ''');
 
         await _createPoemElementTables(db);
+        await _createApiConfigTable(db);
       },
       onUpgrade: (db, oldVersion, newVersion) async {
         if (oldVersion < 2) {
@@ -59,8 +61,33 @@ CREATE TABLE poem_collections (
         if (oldVersion < 3) {
           await _migratePoemsToElements(db);
         }
+        if (oldVersion < 4) {
+          await _createApiConfigTable(db);
+        }
       },
     );
+  }
+
+  Future<void> _createApiConfigTable(DatabaseExecutor db) async {
+    await db.execute('''
+CREATE TABLE api_configs (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  name TEXT NOT NULL,
+  api_spec TEXT NOT NULL DEFAULT '${ApiConfig.openAiSpec}',
+  api_key TEXT NOT NULL DEFAULT '',
+  base_url TEXT NOT NULL DEFAULT '',
+  chat_model TEXT NOT NULL DEFAULT '',
+  embedding_model TEXT NOT NULL DEFAULT '',
+  is_active INTEGER NOT NULL DEFAULT 0,
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL
+)
+''');
+
+    await db.execute(
+      'CREATE INDEX idx_api_configs_is_active ON api_configs(is_active)',
+    );
+    await db.execute('CREATE INDEX idx_api_configs_name ON api_configs(name)');
   }
 
   Future<void> _createPoemElementTables(DatabaseExecutor db) async {
@@ -150,6 +177,143 @@ CREATE TABLE collection_poems (
       orderBy: 'updated_at DESC, name ASC',
     );
     return rows.map(PoemCollection.fromMap).toList();
+  }
+
+  Future<List<ApiConfig>> getApiConfigs({String query = ''}) async {
+    final db = await database;
+    final keyword = query.trim();
+
+    if (keyword.isEmpty) {
+      final rows = await db.query(
+        'api_configs',
+        orderBy: 'is_active DESC, updated_at DESC, name ASC',
+      );
+      return rows.map(ApiConfig.fromMap).toList();
+    }
+
+    final like = '%$keyword%';
+    final rows = await db.query(
+      'api_configs',
+      where: '''
+name LIKE ?
+OR base_url LIKE ?
+OR chat_model LIKE ?
+OR embedding_model LIKE ?
+''',
+      whereArgs: [like, like, like, like],
+      orderBy: 'is_active DESC, updated_at DESC, name ASC',
+    );
+    return rows.map(ApiConfig.fromMap).toList();
+  }
+
+  Future<int> createApiConfig({
+    required String name,
+    required String apiKey,
+    required String baseUrl,
+    required String chatModel,
+    String embeddingModel = '',
+    bool isActive = false,
+  }) async {
+    final now = DateTime.now();
+    final db = await database;
+    final existingCount = Sqflite.firstIntValue(
+          await db.rawQuery('SELECT COUNT(*) FROM api_configs'),
+        ) ??
+        0;
+
+    final config = ApiConfig(
+      name: name.trim(),
+      apiKey: apiKey.trim(),
+      baseUrl: _normalizeBaseUrl(baseUrl),
+      chatModel: chatModel.trim(),
+      embeddingModel: embeddingModel.trim(),
+      isActive: isActive || existingCount == 0,
+      createdAt: now,
+      updatedAt: now,
+    );
+
+    return db.transaction<int>((txn) async {
+      if (config.isActive) {
+        await txn.update('api_configs', {'is_active': 0});
+      }
+      return txn.insert('api_configs', config.toMap());
+    });
+  }
+
+  Future<void> updateApiConfig(ApiConfig config) async {
+    final id = config.id;
+    if (id == null) {
+      throw ArgumentError('Cannot update an API config without an id.');
+    }
+
+    final updatedConfig = config.copyWith(
+      name: config.name.trim(),
+      apiKey: config.apiKey.trim(),
+      baseUrl: _normalizeBaseUrl(config.baseUrl),
+      chatModel: config.chatModel.trim(),
+      embeddingModel: config.embeddingModel.trim(),
+      updatedAt: DateTime.now(),
+    );
+    final db = await database;
+    await db.transaction((txn) async {
+      if (updatedConfig.isActive) {
+        await txn.update('api_configs', {'is_active': 0});
+      }
+      await txn.update(
+        'api_configs',
+        updatedConfig.toMap(),
+        where: 'id = ?',
+        whereArgs: [id],
+      );
+    });
+  }
+
+  Future<void> deleteApiConfig(int id) async {
+    final db = await database;
+    await db.transaction((txn) async {
+      final rows = await txn.query(
+        'api_configs',
+        columns: ['is_active'],
+        where: 'id = ?',
+        whereArgs: [id],
+        limit: 1,
+      );
+      await txn.delete('api_configs', where: 'id = ?', whereArgs: [id]);
+
+      final wasActive = rows.isNotEmpty && rows.first['is_active'] == 1;
+      if (wasActive) {
+        final replacementRows = await txn.query(
+          'api_configs',
+          columns: ['id'],
+          orderBy: 'updated_at DESC, name ASC',
+          limit: 1,
+        );
+        if (replacementRows.isNotEmpty) {
+          await txn.update(
+            'api_configs',
+            {'is_active': 1},
+            where: 'id = ?',
+            whereArgs: [replacementRows.first['id']],
+          );
+        }
+      }
+    });
+  }
+
+  Future<void> setActiveApiConfig(int id) async {
+    final db = await database;
+    await db.transaction((txn) async {
+      await txn.update('api_configs', {'is_active': 0});
+      await txn.update(
+        'api_configs',
+        {
+          'is_active': 1,
+          'updated_at': DateTime.now().millisecondsSinceEpoch,
+        },
+        where: 'id = ?',
+        whereArgs: [id],
+      );
+    });
   }
 
   Future<int> createCollection({
@@ -441,4 +605,12 @@ int _intFromMap(Object? value) {
     return int.tryParse(value) ?? DateTime.now().millisecondsSinceEpoch;
   }
   return DateTime.now().millisecondsSinceEpoch;
+}
+
+String _normalizeBaseUrl(String value) {
+  var normalized = value.trim();
+  while (normalized.endsWith('/')) {
+    normalized = normalized.substring(0, normalized.length - 1);
+  }
+  return normalized;
 }

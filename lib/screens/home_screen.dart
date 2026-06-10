@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import 'api_settings_screen.dart';
 import 'collection_list_screen.dart';
 
 class HomeScreen extends StatelessWidget {
@@ -31,7 +32,7 @@ class HomeScreen extends StatelessWidget {
             _HomeSection(
               title: 'API管理',
               icon: Icons.settings_outlined,
-              destination: PlaceholderFeatureScreen(title: 'API管理'),
+              destination: ApiSettingsScreen(),
             ),
           ],
         ),
