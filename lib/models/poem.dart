@@ -6,10 +6,12 @@ class Poem {
     required this.title,
     required this.author,
     required this.dynasty,
+    this.preface = '',
     required this.content,
     this.remark = '',
     this.translation = '',
     this.annotation = '',
+    this.learningNote = '',
     this.appreciation = '',
     required this.createdAt,
     required this.updatedAt,
@@ -21,10 +23,12 @@ class Poem {
   final String title;
   final String author;
   final String dynasty;
+  final String preface;
   final String content;
   final String remark;
   final String translation;
   final String annotation;
+  final String learningNote;
   final String appreciation;
   final DateTime createdAt;
   final DateTime updatedAt;
@@ -36,10 +40,12 @@ class Poem {
     String? title,
     String? author,
     String? dynasty,
+    String? preface,
     String? content,
     String? remark,
     String? translation,
     String? annotation,
+    String? learningNote,
     String? appreciation,
     DateTime? createdAt,
     DateTime? updatedAt,
@@ -51,10 +57,12 @@ class Poem {
       title: title ?? this.title,
       author: author ?? this.author,
       dynasty: dynasty ?? this.dynasty,
+      preface: preface ?? this.preface,
       content: content ?? this.content,
       remark: remark ?? this.remark,
       translation: translation ?? this.translation,
       annotation: annotation ?? this.annotation,
+      learningNote: learningNote ?? this.learningNote,
       appreciation: appreciation ?? this.appreciation,
       createdAt: createdAt ?? this.createdAt,
       updatedAt: updatedAt ?? this.updatedAt,
@@ -68,10 +76,12 @@ class Poem {
       'title': title,
       'author': author,
       'dynasty': dynasty,
+      'preface': preface,
       'content': content,
       'remark': remark,
       'translation': translation,
       'annotation': annotation,
+      'learning_note': learningNote,
       'appreciation': appreciation,
       'created_at': createdAt.millisecondsSinceEpoch,
       'updated_at': updatedAt.millisecondsSinceEpoch,
@@ -86,10 +96,12 @@ class Poem {
       title: map['title'] as String,
       author: map['author'] as String,
       dynasty: (map['dynasty'] as String?) ?? '',
+      preface: (map['preface'] as String?) ?? '',
       content: map['content'] as String,
       remark: (map['remark'] as String?) ?? '',
       translation: (map['translation'] as String?) ?? '',
       annotation: (map['annotation'] as String?) ?? '',
+      learningNote: (map['learning_note'] as String?) ?? '',
       appreciation: (map['appreciation'] as String?) ?? '',
       createdAt: _dateFromMap(map['created_at']),
       updatedAt: _dateFromMap(map['updated_at']),

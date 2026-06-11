@@ -1,5 +1,3 @@
-import 'dart:async';
-
 import 'package:flutter/material.dart';
 
 import '../data/app_database.dart';
@@ -11,9 +9,14 @@ import '../services/poem_agent_service.dart';
 import '../services/web_search_service.dart';
 
 class PoemAgentChatScreen extends StatefulWidget {
-  const PoemAgentChatScreen({super.key, this.currentCollection});
+  const PoemAgentChatScreen({
+    super.key,
+    this.currentCollection,
+    this.focusPoem,
+  });
 
   final PoemCollection? currentCollection;
+  final Poem? focusPoem;
 
   @override
   State<PoemAgentChatScreen> createState() => _PoemAgentChatScreenState();
@@ -30,13 +33,25 @@ class _PoemAgentChatScreenState extends State<PoemAgentChatScreen> {
   List<PoemCollection> _collections = const <PoemCollection>[];
   Map<int, List<Poem>> _poemsByCollection = const <int, List<Poem>>{};
   Future<void> _pendingMessageSave = Future<void>.value();
+  Poem? _focusPoem;
   bool _loading = true;
   bool _sending = false;
   bool _changed = false;
 
+  String get _screenTitle {
+    final focusPoem = _focusPoem;
+    if (focusPoem != null) {
+      return '《${focusPoem.title}》助手';
+    }
+    return widget.currentCollection == null
+        ? '诗词库助手'
+        : '${widget.currentCollection!.name}助手';
+  }
+
   @override
   void initState() {
     super.initState();
+    _focusPoem = widget.focusPoem;
     _loadContext();
   }
 
@@ -91,6 +106,10 @@ class _PoemAgentChatScreenState extends State<PoemAgentChatScreen> {
     if (collectionId == null) {
       return 'collections';
     }
+    final focusPoemId = _focusPoem?.id;
+    if (focusPoemId != null) {
+      return 'poem:$focusPoemId';
+    }
     return 'collection:$collectionId';
   }
 
@@ -107,7 +126,11 @@ class _PoemAgentChatScreenState extends State<PoemAgentChatScreen> {
     if (widget.currentCollection == null) {
       return '你可以告诉我要把一首或多首诗添加到哪个诗词库，也可以让我修改已有诗词。信息不唯一时，我会继续追问。';
     }
-    return '当前目标诗词库是“${widget.currentCollection!.name}”。你可以直接说要添加一首或多首诗，也可以让我补充译文、丰富赏析、补充注释或更正某首诗。';
+    final focusPoem = _focusPoem;
+    if (focusPoem != null) {
+      return '当前学习的是《${focusPoem.title}》。你可以直接问这首诗的字词、句意、结构、赏析；也可以让我补充或更正它的译文、注释、学习笔记和赏析，我会在信息确定时直接写回诗词库。';
+    }
+    return '当前目标诗词库是“${widget.currentCollection!.name}”。你可以直接说要添加一首或多首诗，也可以让我补充译文、学习笔记、赏析、注释或更正某首诗。';
   }
 
   void _restoreMessages(List<Map<String, Object?>> savedMessages) {
@@ -122,15 +145,56 @@ class _PoemAgentChatScreenState extends State<PoemAgentChatScreen> {
       }
 
       final normalizedRole = role == 'user' ? 'user' : 'assistant';
+      final cleanedContent = normalizedRole == 'assistant'
+          ? _cleanAssistantDisplayText(content)
+          : content;
+      final displayContent = cleanedContent.isEmpty
+          ? content.trim()
+          : cleanedContent;
       _messages.add(
         normalizedRole == 'user'
-            ? _ChatBubbleData.user(content)
-            : _ChatBubbleData.assistant(content),
+            ? _ChatBubbleData.user(displayContent)
+            : _ChatBubbleData.assistant(displayContent),
       );
       _agentHistory.add(
-        PoemAgentMessage(role: normalizedRole, content: content),
+        PoemAgentMessage(role: normalizedRole, content: displayContent),
       );
     }
+  }
+
+  String _cleanAssistantDisplayText(String content) {
+    var text = content.replaceAll('\r\n', '\n').replaceAll('\r', '\n');
+    text = text.replaceAll(RegExp(r'```[a-zA-Z0-9_-]*\n?'), '');
+    text = text.replaceAll('```', '');
+    text = text.replaceAllMapped(
+      RegExp(r'\*\*([^*\n]+)\*\*'),
+      (match) => match.group(1) ?? '',
+    );
+    text = text.replaceAllMapped(
+      RegExp(r'__([^_\n]+)__'),
+      (match) => match.group(1) ?? '',
+    );
+    text = text.replaceAllMapped(
+      RegExp(r'`([^`\n]+)`'),
+      (match) => match.group(1) ?? '',
+    );
+
+    return text
+        .split('\n')
+        .map((line) {
+          var cleanedLine = line.trimRight();
+          cleanedLine = cleanedLine.replaceFirst(
+            RegExp(r'^\s{0,3}#{1,6}\s+'),
+            '',
+          );
+          cleanedLine = cleanedLine.replaceFirst(
+            RegExp(r'^\s{0,3}>\s?'),
+            '',
+          );
+          return cleanedLine;
+        })
+        .join('\n')
+        .trim();
   }
 
   Future<Map<int, List<Poem>>> _loadPoemsByCollection(
@@ -159,9 +223,17 @@ class _PoemAgentChatScreenState extends State<PoemAgentChatScreen> {
     if (!mounted) {
       return;
     }
+    final refreshedFocusPoem = _findPoemByIdInMap(
+      poemsByCollection,
+      _focusPoem?.id,
+      preferredCollectionId: widget.currentCollection?.id,
+    );
     setState(() {
       _collections = collections;
       _poemsByCollection = poemsByCollection;
+      if (refreshedFocusPoem != null) {
+        _focusPoem = refreshedFocusPoem;
+      }
     });
   }
 
@@ -169,11 +241,17 @@ class _PoemAgentChatScreenState extends State<PoemAgentChatScreen> {
     if (!mounted) {
       return;
     }
+    final cleanedContent = _cleanAssistantDisplayText(content);
+    final displayContent = cleanedContent.isEmpty
+        ? content.trim()
+        : cleanedContent;
     setState(() {
-      _messages.add(_ChatBubbleData.assistant(content));
-      _agentHistory.add(PoemAgentMessage(role: 'assistant', content: content));
+      _messages.add(_ChatBubbleData.assistant(displayContent));
+      _agentHistory.add(
+        PoemAgentMessage(role: 'assistant', content: displayContent),
+      );
     });
-    _saveMessage(role: 'assistant', content: content);
+    _saveMessage(role: 'assistant', content: displayContent);
     _scrollToBottom();
   }
 
@@ -190,10 +268,11 @@ class _PoemAgentChatScreenState extends State<PoemAgentChatScreen> {
   }
 
   void _saveMessage({required String role, required String content}) {
+    final scopeKey = _chatScopeKey;
     _pendingMessageSave = _pendingMessageSave
         .then(
           (_) => AppDatabase.instance.addPoemAgentMessage(
-            scopeKey: _chatScopeKey,
+            scopeKey: scopeKey,
             role: role,
             content: content,
           ),
@@ -230,6 +309,7 @@ class _PoemAgentChatScreenState extends State<PoemAgentChatScreen> {
         collections: _collections,
         poemsByCollection: _poemsByCollection,
         currentCollection: widget.currentCollection,
+        focusPoem: _focusPoem,
       );
       await _handleAgentResult(result);
     } on ApiRequestException catch (error) {
@@ -290,12 +370,17 @@ class _PoemAgentChatScreenState extends State<PoemAgentChatScreen> {
       _addAssistantMessage('我还没有拿到足够完整的诗词信息。请补充作者、标题或首句。');
       return;
     }
-    final annotationError = _validateAnnotationFormat(
+    final punctuationError = _validateContentPunctuation(draft.content);
+    if (punctuationError != null) {
+      _addAssistantMessage('模型返回的《${draft.title}》正文标点不符合规范，所以我没有写入。\n\n$punctuationError');
+      return;
+    }
+    final annotationCheck = _normalizeAnnotation(
       content: draft.content,
       annotation: draft.annotation,
     );
-    if (annotationError != null) {
-      _addAssistantMessage('模型返回的《${draft.title}》注释格式不符合规范，所以我没有写入。\n\n$annotationError');
+    if (annotationCheck.blockingError != null) {
+      _addAssistantMessage('模型返回的《${draft.title}》注释无法处理，所以我没有写入。\n\n${annotationCheck.blockingError}');
       return;
     }
 
@@ -304,10 +389,12 @@ class _PoemAgentChatScreenState extends State<PoemAgentChatScreen> {
       title: draft.title,
       author: draft.author,
       dynasty: draft.dynasty,
+      preface: draft.preface,
       content: draft.content,
       remark: draft.remark,
       translation: draft.translation,
-      annotation: draft.annotation,
+      annotation: annotationCheck.annotation,
+      learningNote: draft.learningNote,
       appreciation: draft.appreciation,
     );
 
@@ -320,7 +407,13 @@ class _PoemAgentChatScreenState extends State<PoemAgentChatScreen> {
     final message = result.message.trim().isEmpty
         ? '已将《${draft.title}》添加到“$collectionName”。'
         : '${result.message}\n\n已将《${draft.title}》添加到“$collectionName”。';
-    _addAssistantMessage(_messageWithSources(message, result.searchSources));
+    final warning = _annotationWarningForTitle(draft.title, annotationCheck);
+    final displayMessage = warning == null
+        ? message
+        : '$message\n\n$warning\n可以稍后让我“重新整理《${draft.title}》的注释”。';
+    _addAssistantMessage(
+      _messageWithSources(displayMessage, result.searchSources),
+    );
   }
 
   Future<void> _addPoemsFromAgent(PoemAgentResult result) async {
@@ -346,27 +439,51 @@ class _PoemAgentChatScreenState extends State<PoemAgentChatScreen> {
       );
       return;
     }
+    final punctuationErrors = <String>[];
     for (final draft in drafts) {
-      final annotationError = _validateAnnotationFormat(
-        content: draft.content,
-        annotation: draft.annotation,
+      final punctuationError = _validateContentPunctuation(draft.content);
+      if (punctuationError != null) {
+        punctuationErrors.add('《${draft.title}》：$punctuationError');
+      }
+    }
+    if (punctuationErrors.isNotEmpty) {
+      _addAssistantMessage(
+        '以下诗词正文标点不符合规范，所以我没有执行批量入库：\n${punctuationErrors.join('\n')}',
       );
+      return;
+    }
+    final annotationChecks = [
+      for (final draft in drafts)
+        _normalizeAnnotation(
+          content: draft.content,
+          annotation: draft.annotation,
+        ),
+    ];
+
+    for (var index = 0; index < drafts.length; index += 1) {
+      final draft = drafts[index];
+      final annotationCheck = annotationChecks[index];
+      final annotationError = annotationCheck.blockingError;
       if (annotationError != null) {
-        _addAssistantMessage('模型返回的《${draft.title}》注释格式不符合规范，所以我没有执行批量入库。\n\n$annotationError');
+        _addAssistantMessage('模型返回的《${draft.title}》注释无法处理，所以我没有执行批量入库。\n\n$annotationError');
         return;
       }
     }
 
-    for (final draft in drafts) {
+    for (var index = 0; index < drafts.length; index += 1) {
+      final draft = drafts[index];
+      final annotationCheck = annotationChecks[index];
       await AppDatabase.instance.createPoem(
         collectionId: collectionId,
         title: draft.title,
         author: draft.author,
         dynasty: draft.dynasty,
+        preface: draft.preface,
         content: draft.content,
         remark: draft.remark,
         translation: draft.translation,
-        annotation: draft.annotation,
+        annotation: annotationCheck.annotation,
+        learningNote: draft.learningNote,
         appreciation: draft.appreciation,
       );
     }
@@ -381,7 +498,22 @@ class _PoemAgentChatScreenState extends State<PoemAgentChatScreen> {
     final message = result.message.trim().isEmpty
         ? '已将 $titles 添加到“$collectionName”。'
         : '${result.message}\n\n已将 $titles 添加到“$collectionName”。';
-    _addAssistantMessage(_messageWithSources(message, result.searchSources));
+    final warnings = <String>[];
+    for (var index = 0; index < drafts.length; index += 1) {
+      final warning = _annotationWarningForTitle(
+        drafts[index].title,
+        annotationChecks[index],
+      );
+      if (warning != null) {
+        warnings.add(warning);
+      }
+    }
+    final displayMessage = warnings.isEmpty
+        ? message
+        : '$message\n\n注释处理：\n${warnings.join('\n')}';
+    _addAssistantMessage(
+      _messageWithSources(displayMessage, result.searchSources),
+    );
   }
 
   Future<void> _updatePoemFromAgent(PoemAgentResult result) async {
@@ -392,7 +524,7 @@ class _PoemAgentChatScreenState extends State<PoemAgentChatScreen> {
       return;
     }
     if (!updates.hasChanges) {
-      _addAssistantMessage('我已经找到了诗词，但没有收到明确要修改的字段。请说明要修改内容、注释、赏析还是其它信息。');
+      _addAssistantMessage('我已经找到了诗词，但没有收到明确要修改的字段。请说明要修改内容、注释、学习笔记、赏析还是其它信息。');
       return;
     }
 
@@ -408,6 +540,13 @@ class _PoemAgentChatScreenState extends State<PoemAgentChatScreen> {
         updatedPoem.content.trim().isEmpty) {
       _addAssistantMessage('这次修改会导致标题、作者或内容变为空，所以我没有写入。请重新说明要修改的内容。');
       return;
+    }
+    if (updates.values.containsKey('content')) {
+      final punctuationError = _validateContentPunctuation(updatedPoem.content);
+      if (punctuationError != null) {
+        _addAssistantMessage('模型返回的正文标点不符合规范，所以我没有写入。\n\n$punctuationError');
+        return;
+      }
     }
     if (updates.values.containsKey('annotation') ||
         updates.values.containsKey('content')) {
@@ -434,6 +573,28 @@ class _PoemAgentChatScreenState extends State<PoemAgentChatScreen> {
     _addAssistantMessage(_messageWithSources(message, result.searchSources));
   }
 
+  String? _validateContentPunctuation(String content) {
+    final lines = content
+        .replaceAll('\r\n', '\n')
+        .replaceAll('\r', '\n')
+        .split('\n')
+        .map((line) => line.trim())
+        .where((line) => line.isNotEmpty)
+        .toList(growable: false);
+    if (lines.length < 2) {
+      return null;
+    }
+
+    final joined = lines.join('');
+    final hasChineseText = RegExp(r'[\u4e00-\u9fff]').hasMatch(joined);
+    final hasPunctuation = RegExp(r'[，。？！；：、,.?!;:]').hasMatch(joined);
+    if (!hasChineseText || hasPunctuation) {
+      return null;
+    }
+
+    return '正文有 ${lines.length} 个非空行，但没有逗号、句号等标点。请依据带标点的权威整理本重新生成，不要在换行时删除标点。';
+  }
+
   String _messageWithSources(String message, List<String> sources) {
     if (sources.isEmpty) {
       return message;
@@ -447,11 +608,27 @@ class _PoemAgentChatScreenState extends State<PoemAgentChatScreen> {
     required String content,
     required String annotation,
   }) {
-    final trimmedAnnotation = annotation.trim();
-    if (trimmedAnnotation.isEmpty) {
+    final annotationCheck = _normalizeAnnotation(
+      content: content,
+      annotation: annotation,
+    );
+    if (annotationCheck.blockingError != null) {
+      return annotationCheck.blockingError;
+    }
+    if (annotationCheck.skippedLines.isEmpty) {
       return null;
     }
+    return annotationCheck.skippedLines.first;
+  }
 
+  _AnnotationCheck _normalizeAnnotation({
+    required String content,
+    required String annotation,
+  }) {
+    final trimmedAnnotation = annotation.trim();
+    if (trimmedAnnotation.isEmpty) {
+      return const _AnnotationCheck(annotation: '');
+    }
     final contentLineCount = content
         .replaceAll('\r\n', '\n')
         .replaceAll('\r', '\n')
@@ -459,7 +636,10 @@ class _PoemAgentChatScreenState extends State<PoemAgentChatScreen> {
         .where((line) => line.trim().isNotEmpty)
         .length;
     if (contentLineCount == 0) {
-      return '原文内容为空，无法校验注释行号。';
+      return const _AnnotationCheck(
+        annotation: '',
+        blockingError: '原文内容为空，无法校验注释行号。',
+      );
     }
 
     final annotationLines = trimmedAnnotation
@@ -469,23 +649,47 @@ class _PoemAgentChatScreenState extends State<PoemAgentChatScreen> {
         .where((line) => line.trim().isNotEmpty)
         .toList(growable: false);
     final linePattern = RegExp(r'^\[(\d+)\]\s*\S');
+    final validLines = <String>[];
+    final skippedLines = <String>[];
 
     for (var index = 0; index < annotationLines.length; index += 1) {
       final line = annotationLines[index].trim();
       final match = linePattern.firstMatch(line);
       if (match == null) {
-        return '注释第 ${index + 1} 行没有以 [行号] 开头：$line';
+        skippedLines.add('注释第 ${index + 1} 行没有以 [行号] 开头：$line');
+        continue;
       }
 
       final lineNumber = int.tryParse(match.group(1)!);
       if (lineNumber == null ||
           lineNumber < 1 ||
           lineNumber > contentLineCount) {
-        return '注释第 ${index + 1} 行使用了 [$lineNumber]，但原文只有 $contentLineCount 个非空行。';
+        skippedLines.add(
+          '注释第 ${index + 1} 行使用了 [$lineNumber]，但原文只有 $contentLineCount 个非空行。',
+        );
+        continue;
       }
+      validLines.add(line);
     }
 
-    return null;
+    return _AnnotationCheck(
+      annotation: validLines.join('\n'),
+      skippedLines: List.unmodifiable(skippedLines),
+    );
+  }
+
+  String? _annotationWarningForTitle(
+    String title,
+    _AnnotationCheck annotationCheck,
+  ) {
+    if (annotationCheck.skippedLines.isEmpty) {
+      return null;
+    }
+
+    final details = annotationCheck.skippedLines.take(3).join('；');
+    final remainingCount = annotationCheck.skippedLines.length - 3;
+    final remainingText = remainingCount > 0 ? '；另有 $remainingCount 条。' : '。';
+    return '《$title》有 ${annotationCheck.skippedLines.length} 条注释未能和正文行号对齐，已跳过：$details$remainingText';
   }
 
   Poem? _findPoemById(int poemId) {
@@ -502,6 +706,36 @@ class _PoemAgentChatScreenState extends State<PoemAgentChatScreen> {
     }
 
     for (final poems in _poemsByCollection.values) {
+      for (final poem in poems) {
+        if (poem.id == poemId) {
+          return poem;
+        }
+      }
+    }
+    return null;
+  }
+
+  Poem? _findPoemByIdInMap(
+    Map<int, List<Poem>> poemsByCollection,
+    int? poemId, {
+    int? preferredCollectionId,
+  }) {
+    if (poemId == null) {
+      return null;
+    }
+
+    final preferredPoems = preferredCollectionId == null
+        ? null
+        : poemsByCollection[preferredCollectionId];
+    if (preferredPoems != null) {
+      for (final poem in preferredPoems) {
+        if (poem.id == poemId) {
+          return poem;
+        }
+      }
+    }
+
+    for (final poems in poemsByCollection.values) {
       for (final poem in poems) {
         if (poem.id == poemId) {
           return poem;
@@ -539,33 +773,50 @@ class _PoemAgentChatScreenState extends State<PoemAgentChatScreen> {
       return;
     }
 
-    final confirmed = await showDialog<bool>(
+    final resetMode = await showDialog<_ConversationResetMode>(
       context: context,
       builder: (context) {
         return AlertDialog(
           title: const Text('清除并重置对话'),
-          content: const Text('确定清除当前助手对话历史吗？这不会影响诗词库内容。'),
+          content: const Text(
+            '这只会清除助手对话历史，不会影响诗词库内容。若担心其它页面残留旧上下文，可以清除全部助手对话。',
+          ),
           actions: [
             TextButton(
-              onPressed: () => Navigator.pop(context, false),
+              onPressed: () => Navigator.pop(context),
               child: const Text('取消'),
             ),
+            TextButton(
+              onPressed: () => Navigator.pop(
+                context,
+                _ConversationResetMode.all,
+              ),
+              child: const Text('清除全部'),
+            ),
             FilledButton(
-              onPressed: () => Navigator.pop(context, true),
-              child: const Text('清除'),
+              onPressed: () => Navigator.pop(
+                context,
+                _ConversationResetMode.current,
+              ),
+              child: const Text('清除当前'),
             ),
           ],
         );
       },
     );
 
-    if (confirmed != true) {
+    if (resetMode == null) {
       return;
     }
 
     try {
+      final scopeKey = _chatScopeKey;
       await _pendingMessageSave;
-      await AppDatabase.instance.clearPoemAgentMessages(_chatScopeKey);
+      if (resetMode == _ConversationResetMode.all) {
+        await AppDatabase.instance.clearAllPoemAgentMessages();
+      } else {
+        await AppDatabase.instance.clearPoemAgentMessages(scopeKey);
+      }
       if (!mounted) {
         return;
       }
@@ -575,7 +826,11 @@ class _PoemAgentChatScreenState extends State<PoemAgentChatScreen> {
         _agentHistory.clear();
       });
       _addAssistantMessage(_buildInitialMessage(_apiConfig, _collections));
-      _showSnackBar('已重置当前对话');
+      _showSnackBar(
+        resetMode == _ConversationResetMode.all
+            ? '已清除全部助手对话'
+            : '已重置当前对话',
+      );
     } catch (error) {
       _showSnackBar('重置失败：$error');
     }
@@ -606,9 +861,9 @@ class _PoemAgentChatScreenState extends State<PoemAgentChatScreen> {
             icon: const Icon(Icons.arrow_back),
           ),
           title: Text(
-            widget.currentCollection == null
-                ? '诗词库助手'
-                : '${widget.currentCollection!.name}助手',
+            _screenTitle,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
           ),
           actions: [
             IconButton(
@@ -630,7 +885,10 @@ class _PoemAgentChatScreenState extends State<PoemAgentChatScreen> {
                         itemCount: _messages.length,
                         itemBuilder: (context, index) {
                           final message = _messages[index];
-                          return _ChatBubble(message: message);
+                          return Padding(
+                            padding: const EdgeInsets.only(bottom: 10),
+                            child: _ChatBubble(message: message),
+                          );
                         },
                       ),
               ),
@@ -683,6 +941,20 @@ class _ChatBubbleData {
   final String content;
   final bool isUser;
 }
+
+class _AnnotationCheck {
+  const _AnnotationCheck({
+    required this.annotation,
+    this.blockingError,
+    this.skippedLines = const <String>[],
+  });
+
+  final String annotation;
+  final String? blockingError;
+  final List<String> skippedLines;
+}
+
+enum _ConversationResetMode { current, all }
 
 class _ChatBubble extends StatelessWidget {
   const _ChatBubble({required this.message});

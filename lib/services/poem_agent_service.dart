@@ -21,7 +21,10 @@ class PoemAgentService {
     required List<PoemCollection> collections,
     required Map<int, List<Poem>> poemsByCollection,
     PoemCollection? currentCollection,
+    Poem? focusPoem,
   }) async {
+    final requestHistory = _historyForCurrentRequest(history);
+    final latestUserRequest = _latestUserRequest(history);
     final content = await apiService.createChatCompletion(
       config: config,
       messages: [
@@ -31,10 +34,12 @@ class PoemAgentService {
             collections: collections,
             poemsByCollection: poemsByCollection,
             currentCollection: currentCollection,
+            focusPoem: focusPoem,
             searchAvailable: config.isSearchEnabled,
           ),
         },
-        for (final message in history)
+        _latestRequestMessage(latestUserRequest),
+        for (final message in requestHistory)
           {
             'role': message.role,
             'content': message.content,
@@ -54,7 +59,7 @@ class PoemAgentService {
     if (!config.isSearchEnabled) {
       return const PoemAgentResult(
         type: 'ask',
-        message: '当前 API 配置还没有启用联网搜索。请先在 API 管理中为当前配置填写 Tavily API Key，或补充可核验的资料。',
+        message: '当前 API 配置还没有启用联网搜索。请先在 API 管理中为当前配置填写 Tavily 或博查 API Key，或补充可核验的资料。',
       );
     }
 
@@ -80,11 +85,13 @@ class PoemAgentService {
             collections: collections,
             poemsByCollection: poemsByCollection,
             currentCollection: currentCollection,
+            focusPoem: focusPoem,
             searchAvailable: true,
             searchResult: searchResult,
           ),
         },
-        for (final message in history)
+        _latestRequestMessage(latestUserRequest),
+        for (final message in requestHistory)
           {
             'role': message.role,
             'content': message.content,
@@ -96,7 +103,8 @@ class PoemAgentService {
         {
           'role': 'system',
           'content': 'App 已根据 query="${initialResult.searchQuery}" 完成联网搜索。'
-              '请根据上方搜索结果返回最终 JSON，不要再次返回 search。',
+              '请根据上方搜索结果返回最终 JSON，不要再次返回 search。'
+              '最终结果只能围绕“本轮用户最新请求”，不得把历史对话中的其它诗题、其它添加任务或旧搜索结果当作当前目标。',
         },
       ],
     );
@@ -122,6 +130,7 @@ class PoemAgentService {
     required List<PoemCollection> collections,
     required Map<int, List<Poem>> poemsByCollection,
     required PoemCollection? currentCollection,
+    required Poem? focusPoem,
     required bool searchAvailable,
     WebSearchResult? searchResult,
   }) {
@@ -139,13 +148,17 @@ class PoemAgentService {
       poemsByCollection: poemsByCollection,
       currentCollection: currentCollection,
     );
+    final focusPoemBlock = _buildFocusPoemBlock(focusPoem);
 
     final context = currentCollection == null
         ? '当前位于“诗词库管理”页面。用户若要添加诗词，必须明确目标诗词库；用户若要修改诗词，必须明确到一个本地 poem_id。'
         : '当前位于诗词库“${currentCollection.name}”（id=${currentCollection.id}）内部。添加诗词默认归入当前库；修改诗词只允许使用当前库清单中列出的 poem_id。';
+    final focusContext = focusPoem == null
+        ? ''
+        : '当前学习模式聚焦诗词：poem_id=${focusPoem.id}，《${focusPoem.title}》，${focusPoem.dynasty}，${focusPoem.author}。用户说“这首诗”“当前诗”“这句”时，默认指这首诗；涉及修改时应优先使用这个 poem_id。若用户要求补充或更正译文、注释、学习笔记、赏析，且可确定内容，应直接返回 update_poem 写回诗词库；若用户说的内容与它明显不符，必须追问确认。';
     final searchState = searchResult == null
         ? searchAvailable
-            ? '联网搜索已启用。若用户要求添加诗词、补充译文/注释/赏析或纠错，先确认目标库和诗词身份是否唯一；若仍不唯一则 ask，若已经唯一且本轮尚无搜索结果，则必须先返回 search 动作，让 App 先联网检索，不得直接 add_poem、add_poems 或 update_poem。'
+            ? '联网搜索已启用。若用户要求添加新诗、核验原文事实、校正作者朝代、或要求依据外部资料补充内容，先确认目标库和诗词身份是否唯一；若仍不唯一则 ask，若已经唯一且本轮尚无搜索结果，则必须先返回 search 动作，让 App 先联网检索。若用户只是要求基于当前聚焦诗词的已有内容调整措辞、整理注释格式、改写译文、补充学习笔记或润色赏析，且不需要外部事实核验，可以直接返回 update_poem。'
             : '联网搜索未启用。不要声称已经联网搜索；如果需要外部核验，应 ask 用户配置联网搜索或补充资料。'
         : 'App 已完成联网搜索。你必须优先依据下方搜索结果返回最终动作，不得再次返回 search。若搜索结果不足、冲突或无法核验，应返回 ask 或 not_found。';
     final searchBlock = searchResult == null
@@ -161,6 +174,8 @@ ${searchResult.toPromptText()}
 
 $context
 
+$focusContext
+
 $searchState
 
 可用诗词库：
@@ -168,6 +183,9 @@ $collectionLines
 
 当前可编辑诗词清单（更新诗词时只能使用这里列出的 poem_id）：
 $poemLines
+
+当前聚焦诗词完整内容（学习模式或训练模式中用于回答与修改）：
+$focusPoemBlock
 $searchBlock
 
 格式示例：
@@ -196,13 +214,13 @@ JSON 格式只能是以下七类之一：
 {"type":"search","message":"我需要先联网核验","query":"作者 标题 全文 译文 注释 赏析"}
 
 3. 可以添加诗词：
-{"type":"add_poem","message":"简短说明","collection_id":1,"poem":{"title":"标题","author":"作者","dynasty":"朝代","content":"诗词全文，一行一句","remark":"","translation":"译文","annotation":"注释","appreciation":"赏析"}}
+{"type":"add_poem","message":"简短说明","collection_id":1,"poem":{"title":"标题","author":"作者","dynasty":"朝代","preface":"序或小序，没有则留空","content":"诗词全文，一行一句","remark":"","translation":"译文","annotation":"注释","learning_note":"","appreciation":"赏析"}}
 
 4. 可以一次添加多首诗词：
-{"type":"add_poems","message":"简短说明","collection_id":1,"poems":[{"title":"标题","author":"作者","dynasty":"朝代","content":"诗词全文，一行一句","remark":"","translation":"译文","annotation":"注释","appreciation":"赏析"},{"title":"标题","author":"作者","dynasty":"朝代","content":"诗词全文，一行一句","remark":"","translation":"译文","annotation":"注释","appreciation":"赏析"}]}
+{"type":"add_poems","message":"简短说明","collection_id":1,"poems":[{"title":"标题","author":"作者","dynasty":"朝代","preface":"序或小序，没有则留空","content":"诗词全文，一行一句","remark":"","translation":"译文","annotation":"注释","learning_note":"","appreciation":"赏析"},{"title":"标题","author":"作者","dynasty":"朝代","preface":"序或小序，没有则留空","content":"诗词全文，一行一句","remark":"","translation":"译文","annotation":"注释","learning_note":"","appreciation":"赏析"}]}
 
 5. 可以更新已有诗词元素：
-{"type":"update_poem","message":"简短说明","poem_id":12,"updates":{"translation":"新的译文","appreciation":"新的赏析内容","annotation":"新的注释"}}
+{"type":"update_poem","message":"简短说明","poem_id":12,"updates":{"translation":"新的译文","annotation":"新的注释","learning_note":"新的学习笔记","appreciation":"新的赏析内容"}}
 
 6. 确认不存在或无法查到：
 {"type":"not_found","message":"说明为什么不执行操作"}
@@ -213,26 +231,42 @@ JSON 格式只能是以下七类之一：
 规则：
 - search 只能在联网搜索已启用且本轮没有搜索结果时返回；一旦已有搜索结果，不得再次返回 search。
 - search.query 应包含作者、标题、首句、全文、译文、注释、赏析等能帮助检索的关键词；一次添加多首诗时，query 可以包含所有诗题和作者。
+- 如果用户提供了首句、长题片段或别名，search.query 必须原样包含这些短语；不要把用户给出的首句省略掉，也不要只用简称搜索。
+- App 会自动优先搜索古文岛、古诗文库、百度百科、百度汉语、维基文库、中华诗词、搜韵等来源；如果搜索结果中有这些来源，必须优先依据它们。新闻、论坛、个人站、泛内容站只能作辅助，不能作为添加长诗全文的唯一依据。
+- 每次执行添加、搜索或更新时，目标必须以“本轮用户最新请求”为准；历史对话只用于理解必要的澄清，不得把历史中的其它诗题、旧搜索结果或旧添加任务当成当前目标。
+- 所有 message、translation、annotation、learning_note、appreciation 等文本字段都必须使用纯文本，不要使用 Markdown 标记；不要输出 **粗体**、# 标题、> 引用、```代码块``` 或反引号。
+- 普通回答如需分点，可使用自然段或“1.”、“2.”这样的纯文本编号，不要用 Markdown 粗体、标题或引用格式。
+- 即使只是普通问答、赏析或解释，也必须返回 {"type":"answer","message":"回答内容"}，不要直接输出自然语言正文。
 - 用户要求添加诗词时，如果目标库不唯一，必须先追问。
 - 用户要求添加诗词时，如果诗词不唯一，例如“无题”这类同名诗，必须先追问作者、首句或其它可唯一识别的信息。
 - 用户要求一次添加多首诗词，且所有诗词都能唯一确认时，返回 add_poems；如果其中任何一首不唯一或无法确认，必须先 ask，不能部分入库。
-- 用户要求修改、丰富、纠错、补充译文、补充注释或补充赏析时，必须先从“当前可编辑诗词清单”中确定唯一 poem_id；如果候选不唯一，必须追问并列出可区分的信息。
-- update_poem 的 updates 只能包含 title、author、dynasty、content、remark、translation、annotation、appreciation 这些字段，且只包含真正需要修改的字段。
+- 用户要求修改、丰富、纠错、补充译文、补充注释、补充学习笔记或补充赏析时，必须先从“当前可编辑诗词清单”中确定唯一 poem_id；如果候选不唯一，必须追问并列出可区分的信息。
+- update_poem 的 updates 只能包含 title、author、dynasty、preface、content、remark、translation、annotation、learning_note、appreciation 这些字段，且只包含真正需要修改的字段。
+- update_poem 的字段值必须是该字段“更新后的完整内容”，不是局部补丁；例如只修改 annotation 中某个词条时，也必须在 annotation 中返回保留其它原有注释后的完整注释文本。
+- 如果当前聚焦诗词完整内容中已经提供 annotation、translation、learning_note 或 appreciation，不得声称不知道现有注释、译文、学习笔记或赏析；只有该字段确实为空时，才可说明暂无现有内容。
 - 不允许只凭标题直接更新；同名诗、同作者同题诗或信息不足时必须 ask。
 - 如果用户要求纠错，而你不能可靠确认正确内容，必须 ask 或 not_found，不能编造。
 - “补充译文”“丰富赏析”“完善注释”可以基于已有原文与可靠文学常识生成；涉及原文、作者、朝代等事实性改动时必须更谨慎。
 - 只有 App 提供“联网搜索结果”时，才可声称已经联网核验；如果没有搜索结果且无法可靠确认，必须返回 search、ask 或 not_found，不能编造。
 - 只有在目标库和诗词都唯一、且你能给出可靠全文时，才能返回 add_poem。
 - 内容格式规范：
+  - 写入数据库的字段必须是可直接显示和保存的纯文本，不能包含 Markdown 标记。
   - content 必须是完整原文，按诗句或词句的传统节奏单位换行，一句一行；不要只按句号、问号、叹号机械换行。
+  - content 必须保留权威来源或通行整理本中的现代标点，包括逗号、句号、问号、叹号、分号、冒号、顿号等；换行时不得删除标点。
+  - 五言、七言诗句如果原整理本为“天上白玉京，十二楼五城。”，应写成“天上白玉京，”换行“十二楼五城。”，不能写成“天上白玉京”换行“十二楼五城”。
+  - 如果搜索结果只有无标点古籍文本，应优先继续寻找带标点的权威整理本；不能可靠补出标点时，不要添加入库，应 ask 用户确认是否接受无标点版本。
+  - preface 只填写题前序、词前小序或作者原有题注，例如“丙辰中秋，欢饮达旦……兼怀子由。”；不要把序混入 content，也不要把普通备注写入 preface。
   - 长篇歌行、古体诗仍按诗句单位换行；如权威通行版本有明显分段，可用空行保留分段。
   - translation 尽量与 content 行数和顺序对应，一句译文一行；无法逐句对应时，按自然段保持可读。
   - annotation 使用“[行号] 注释内容”的格式，一条注释一行；这里的行号不是注释序号，而是 content 中从 1 开始计算的原文行号，空行不计入行号。
   - annotation 的所有行都必须以 [行号] 开头，且行号不得超过 content 的非空原文行数。例如 content 有 4 行时，只能使用 [1]、[2]、[3]、[4]。
   - 同一原文行有多个注释时，可以写多条相同 [行号]，例如 “[3] 翔：这里指奔走、跳跃。”
+  - 长篇诗文的 annotation 不必逐行覆盖，优先给出能准确对齐原文行号的关键注释；不能确认行号的注释宁可省略，不要编造或使用超出 content 行数的行号。
+  - 返回前必须自检：annotation 中最大的 [行号] 不能超过 content 的非空原文行数。
+  - learning_note 是用户个人学习笔记，可写个人理解、疑问、记忆方法、课堂笔记或待复习点；添加新诗时除非用户明确要求，一般留空。
   - appreciation 使用自然段，不强制编号；重点写主题、情感、结构、艺术手法和学习提示。
   - remark 只在需要区分同名诗时填写，例如首句、常用别名。
-- translation、annotation 和 appreciation 尽量填写。
+- translation、annotation 和 appreciation 尽量填写；learning_note 除非用户要求，一般不要自动编写。
 - collection_id 必须是上方可用诗词库中的 id。当前在某个诗词库内部时，默认使用当前库 id。
 ''';
   }
@@ -277,6 +311,9 @@ JSON 格式只能是以下七类之一：
         final remark = poem.remark.trim().isEmpty
             ? ''
             : '，备注：${_compact(poem.remark, maxLength: 28)}';
+        final preface = poem.preface.trim().isEmpty
+            ? ''
+            : '，序：${_compact(poem.preface, maxLength: 36)}';
         final content = _compact(poem.content, maxLength: 72);
         final translation = poem.translation.trim().isEmpty
             ? ''
@@ -284,13 +321,47 @@ JSON 格式只能是以下七类之一：
         final appreciation = poem.appreciation.trim().isEmpty
             ? ''
             : '，赏析片段：${_compact(poem.appreciation, maxLength: 48)}';
+        final learningNote = poem.learningNote.trim().isEmpty
+            ? ''
+            : '，笔记片段：${_compact(poem.learningNote, maxLength: 48)}';
         lines.add(
-          '- poem_id=$id，《${poem.title}》，$dynasty，$author$remark，内容片段：$content$translation$appreciation',
+          '- poem_id=$id，《${poem.title}》，$dynasty，$author$remark$preface，内容片段：$content$translation$learningNote$appreciation',
         );
       }
     }
 
     return lines.join('\n');
+  }
+
+  String _buildFocusPoemBlock(Poem? poem) {
+    if (poem == null) {
+      return '（无当前聚焦诗词）';
+    }
+
+    return '''
+poem_id: ${poem.id}
+title: ${poem.title}
+author: ${poem.author}
+dynasty: ${poem.dynasty}
+remark: ${_emptyAsNone(poem.remark)}
+preface:
+${_emptyAsNone(poem.preface)}
+
+content:
+${_emptyAsNone(poem.content)}
+
+translation:
+${_emptyAsNone(poem.translation)}
+
+annotation:
+${_emptyAsNone(poem.annotation)}
+
+learning_note:
+${_emptyAsNone(poem.learningNote)}
+
+appreciation:
+${_emptyAsNone(poem.appreciation)}
+''';
   }
 }
 
@@ -300,6 +371,37 @@ class PoemAgentMessage {
   final String role;
   final String content;
 }
+
+List<PoemAgentMessage> _historyForCurrentRequest(
+  List<PoemAgentMessage> history,
+) {
+  if (history.length <= _requestHistoryLimit) {
+    return List.unmodifiable(history);
+  }
+  return List.unmodifiable(
+    history.sublist(history.length - _requestHistoryLimit),
+  );
+}
+
+String _latestUserRequest(List<PoemAgentMessage> history) {
+  for (var index = history.length - 1; index >= 0; index -= 1) {
+    final message = history[index];
+    if (message.role == 'user' && message.content.trim().isNotEmpty) {
+      return message.content.trim();
+    }
+  }
+  return '';
+}
+
+Map<String, String> _latestRequestMessage(String latestUserRequest) {
+  final content = latestUserRequest.trim().isEmpty
+      ? '本轮用户最新请求为空；如信息不足，应 ask。'
+      : '本轮用户最新请求：$latestUserRequest\n'
+          '除非用户明确要求延续前文，否则添加、搜索、更新、入库的目标只能来自本轮最新请求和必要的澄清上下文。';
+  return {'role': 'system', 'content': content};
+}
+
+const _requestHistoryLimit = 8;
 
 class PoemAgentResult {
   const PoemAgentResult({
@@ -339,14 +441,24 @@ class PoemAgentResult {
     String? searchQuery,
     List<String> searchSources = const <String>[],
   }) {
-    final decoded = jsonDecode(_extractJsonObject(text));
+    final jsonObject = _tryExtractJsonObject(text);
+    if (jsonObject == null) {
+      final fallbackMessage = _plainTextFromModel(text);
+      return PoemAgentResult(
+        type: 'answer',
+        message: fallbackMessage.isEmpty ? '模型返回了空内容。' : fallbackMessage,
+        searchSources: searchSources,
+      );
+    }
+
+    final decoded = jsonDecode(jsonObject);
     final map = _readObjectMap(decoded);
     if (map == null) {
       throw const FormatException('模型返回的 JSON 顶层不是对象。');
     }
 
     final type = (map['type'] as String?)?.trim() ?? 'answer';
-    final message = (map['message'] as String?)?.trim() ?? '';
+    final message = _plainTextFromModel(map['message']);
     final rawCollectionId = map['collection_id'];
     final collectionId = currentCollectionId ?? _readInt(rawCollectionId);
     final rawPoem = _readObjectMap(map['poem']);
@@ -377,20 +489,24 @@ class PoemAgentDraft {
     required this.title,
     required this.author,
     required this.dynasty,
+    this.preface = '',
     required this.content,
     this.remark = '',
     this.translation = '',
     this.annotation = '',
+    this.learningNote = '',
     this.appreciation = '',
   });
 
   final String title;
   final String author;
   final String dynasty;
+  final String preface;
   final String content;
   final String remark;
   final String translation;
   final String annotation;
+  final String learningNote;
   final String appreciation;
 
   bool get isComplete {
@@ -401,14 +517,18 @@ class PoemAgentDraft {
 
   factory PoemAgentDraft.fromMap(Map<String, Object?> map) {
     return PoemAgentDraft(
-      title: (map['title'] as String?)?.trim() ?? '',
-      author: (map['author'] as String?)?.trim() ?? '',
-      dynasty: (map['dynasty'] as String?)?.trim() ?? '',
-      content: (map['content'] as String?)?.trim() ?? '',
-      remark: (map['remark'] as String?)?.trim() ?? '',
-      translation: (map['translation'] as String?)?.trim() ?? '',
-      annotation: (map['annotation'] as String?)?.trim() ?? '',
-      appreciation: (map['appreciation'] as String?)?.trim() ?? '',
+      title: _plainTextFromModel(map['title']),
+      author: _plainTextFromModel(map['author']),
+      dynasty: _plainTextFromModel(map['dynasty']),
+      preface: _plainTextFromModel(map['preface']),
+      content: _plainTextFromModel(map['content']),
+      remark: _plainTextFromModel(map['remark']),
+      translation: _plainTextFromModel(map['translation']),
+      annotation: _plainTextFromModel(map['annotation']),
+      learningNote: _plainTextFromModel(
+        map['learning_note'] ?? map['learningNote'],
+      ),
+      appreciation: _plainTextFromModel(map['appreciation']),
     );
   }
 }
@@ -420,10 +540,12 @@ class PoemAgentUpdates {
     'title',
     'author',
     'dynasty',
+    'preface',
     'content',
     'remark',
     'translation',
     'annotation',
+    'learning_note',
     'appreciation',
   };
 
@@ -431,10 +553,12 @@ class PoemAgentUpdates {
     'title': '标题',
     'author': '作者',
     'dynasty': '朝代',
+    'preface': '序/小序',
     'content': '内容',
     'remark': '备注',
     'translation': '译文',
     'annotation': '注释',
+    'learning_note': '学习笔记',
     'appreciation': '赏析',
   };
 
@@ -453,12 +577,15 @@ class PoemAgentUpdates {
       title: values.containsKey('title') ? values['title'] : null,
       author: values.containsKey('author') ? values['author'] : null,
       dynasty: values.containsKey('dynasty') ? values['dynasty'] : null,
+      preface: values.containsKey('preface') ? values['preface'] : null,
       content: values.containsKey('content') ? values['content'] : null,
       remark: values.containsKey('remark') ? values['remark'] : null,
       translation:
           values.containsKey('translation') ? values['translation'] : null,
       annotation:
           values.containsKey('annotation') ? values['annotation'] : null,
+      learningNote:
+          values.containsKey('learning_note') ? values['learning_note'] : null,
       appreciation:
           values.containsKey('appreciation') ? values['appreciation'] : null,
     );
@@ -467,18 +594,59 @@ class PoemAgentUpdates {
   factory PoemAgentUpdates.fromMap(Map<String, Object?> map) {
     final values = <String, String>{};
     for (final entry in map.entries) {
-      final key = entry.key.trim();
+      final rawKey = entry.key.trim();
+      final key = rawKey == 'learningNote' ? 'learning_note' : rawKey;
       if (!_allowedFields.contains(key) || entry.value == null) {
         continue;
       }
-      values[key] = entry.value.toString().trim();
+      values[key] = _plainTextFromModel(entry.value);
     }
 
     return PoemAgentUpdates(values: Map.unmodifiable(values));
   }
 }
 
-String _extractJsonObject(String text) {
+String _plainTextFromModel(Object? value) {
+  var text = (value?.toString() ?? '').trim();
+  if (text.isEmpty) {
+    return '';
+  }
+
+  text = text.replaceAll('\r\n', '\n').replaceAll('\r', '\n');
+  text = text.replaceAll(RegExp(r'```[a-zA-Z0-9_-]*\n?'), '');
+  text = text.replaceAll('```', '');
+  text = text.replaceAllMapped(
+    RegExp(r'\*\*([^*\n]+)\*\*'),
+    (match) => match.group(1) ?? '',
+  );
+  text = text.replaceAllMapped(
+    RegExp(r'__([^_\n]+)__'),
+    (match) => match.group(1) ?? '',
+  );
+  text = text.replaceAllMapped(
+    RegExp(r'`([^`\n]+)`'),
+    (match) => match.group(1) ?? '',
+  );
+
+  return text
+      .split('\n')
+      .map((line) {
+        var cleanedLine = line.trimRight();
+        cleanedLine = cleanedLine.replaceFirst(
+          RegExp(r'^\s{0,3}#{1,6}\s+'),
+          '',
+        );
+        cleanedLine = cleanedLine.replaceFirst(
+          RegExp(r'^\s{0,3}>\s?'),
+          '',
+        );
+        return cleanedLine;
+      })
+      .join('\n')
+      .trim();
+}
+
+String? _tryExtractJsonObject(String text) {
   var trimmed = text.trim();
   if (trimmed.startsWith('```')) {
     final firstLineBreak = trimmed.indexOf('\n');
@@ -493,7 +661,7 @@ String _extractJsonObject(String text) {
   final start = trimmed.indexOf('{');
   final end = trimmed.lastIndexOf('}');
   if (start < 0 || end <= start) {
-    throw FormatException('模型没有返回 JSON 对象：$text');
+    return null;
   }
   return trimmed.substring(start, end + 1);
 }
@@ -549,4 +717,9 @@ String _compact(String value, {required int maxLength}) {
     return compacted;
   }
   return '${compacted.substring(0, maxLength)}...';
+}
+
+String _emptyAsNone(String value) {
+  final trimmed = value.trim();
+  return trimmed.isEmpty ? '（空）' : trimmed;
 }

@@ -324,7 +324,7 @@ class _PoemListScreenState extends State<PoemListScreen> {
                         },
                         icon: const Icon(Icons.close),
                       ),
-                labelText: '搜索标题、作者、内容、备注、译文、注释或赏析',
+                labelText: '搜索标题、作者、序、内容、备注、译文、注释、笔记或赏析',
               ),
               onChanged: (_) => _refreshPoems(),
             ),
@@ -550,6 +550,24 @@ class _PoemCard extends StatelessWidget {
                             style: theme.textTheme.bodySmall,
                           ),
                         ),
+                      ),
+                    ],
+                    if (poem.preface.isNotEmpty) ...[
+                      const SizedBox(height: 8),
+                      Text(
+                        '序：${poem.preface}',
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: theme.textTheme.bodySmall,
+                      ),
+                    ],
+                    if (poem.learningNote.isNotEmpty) ...[
+                      const SizedBox(height: 8),
+                      Text(
+                        '笔记：${poem.learningNote}',
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: theme.textTheme.bodySmall,
                       ),
                     ],
                     const SizedBox(height: 8),

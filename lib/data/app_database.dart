@@ -31,7 +31,7 @@ class AppDatabase {
 
     return openDatabase(
       path,
-      version: 8,
+      version: 11,
       onConfigure: (db) async {
         await db.execute('PRAGMA foreign_keys = ON');
       },
@@ -41,6 +41,7 @@ CREATE TABLE poem_collections (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   name TEXT NOT NULL,
   description TEXT NOT NULL DEFAULT '',
+  is_favorites INTEGER NOT NULL DEFAULT 0,
   created_at INTEGER NOT NULL,
   updated_at INTEGER NOT NULL
 )
@@ -49,6 +50,7 @@ CREATE TABLE poem_collections (
         await _createPoemElementTables(db);
         await _createApiConfigTable(db);
         await _createPoemAgentMessageTable(db);
+        await _createLearningProgressTable(db);
       },
       onUpgrade: (db, oldVersion, newVersion) async {
         if (oldVersion < 2) {
@@ -111,6 +113,24 @@ AND search_api_key != ''
         if (oldVersion < 8) {
           await _createPoemAgentMessageTable(db);
         }
+        if (oldVersion >= 3 && oldVersion < 9) {
+          await db.execute(
+            "ALTER TABLE poem_elements ADD COLUMN preface TEXT NOT NULL DEFAULT ''",
+          );
+        }
+        if (oldVersion < 9) {
+          await _createLearningProgressTable(db);
+        }
+        if (oldVersion >= 3 && oldVersion < 10) {
+          await db.execute(
+            "ALTER TABLE poem_elements ADD COLUMN learning_note TEXT NOT NULL DEFAULT ''",
+          );
+        }
+        if (oldVersion < 11) {
+          await db.execute(
+            'ALTER TABLE poem_collections ADD COLUMN is_favorites INTEGER NOT NULL DEFAULT 0',
+          );
+        }
       },
     );
   }
@@ -168,10 +188,12 @@ CREATE TABLE poem_elements (
   title TEXT NOT NULL,
   author TEXT NOT NULL,
   dynasty TEXT NOT NULL DEFAULT '',
+  preface TEXT NOT NULL DEFAULT '',
   content TEXT NOT NULL,
   remark TEXT NOT NULL DEFAULT '',
   translation TEXT NOT NULL DEFAULT '',
   annotation TEXT NOT NULL DEFAULT '',
+  learning_note TEXT NOT NULL DEFAULT '',
   appreciation TEXT NOT NULL DEFAULT '',
   created_at INTEGER NOT NULL,
   updated_at INTEGER NOT NULL
@@ -209,6 +231,27 @@ CREATE TABLE collection_poems (
     );
   }
 
+  Future<void> _createLearningProgressTable(DatabaseExecutor db) async {
+    await db.execute('''
+CREATE TABLE IF NOT EXISTS learning_progress (
+  collection_id INTEGER PRIMARY KEY,
+  poem_id INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL,
+  FOREIGN KEY (collection_id)
+    REFERENCES poem_collections (id)
+    ON DELETE CASCADE,
+  FOREIGN KEY (poem_id)
+    REFERENCES poem_elements (id)
+    ON DELETE CASCADE
+)
+''');
+
+    await db.execute(
+      'CREATE INDEX IF NOT EXISTS idx_learning_progress_updated_at '
+      'ON learning_progress(updated_at)',
+    );
+  }
+
   Future<void> _migratePoemsToElements(Database db) async {
     await _createPoemElementTables(db);
 
@@ -223,10 +266,12 @@ CREATE TABLE collection_poems (
         'title': oldPoem['title'],
         'author': oldPoem['author'],
         'dynasty': oldPoem['dynasty'] ?? '',
+        'preface': '',
         'content': oldPoem['content'],
         'remark': oldPoem['remark'] ?? '',
         'translation': '',
         'annotation': oldPoem['annotation'] ?? '',
+        'learning_note': '',
         'appreciation': oldPoem['appreciation'] ?? '',
         'created_at': createdAt,
         'updated_at': _intFromMap(oldPoem['updated_at']),
@@ -340,6 +385,57 @@ OR search_provider LIKE ?
       'poem_agent_messages',
       where: 'scope_key = ?',
       whereArgs: [scopeKey],
+    );
+  }
+
+  Future<void> clearAllPoemAgentMessages() async {
+    final db = await database;
+    await db.delete('poem_agent_messages');
+  }
+
+  Future<int?> getLastLearningCollectionId() async {
+    final db = await database;
+    final rows = await db.rawQuery('''
+SELECT lp.collection_id
+FROM learning_progress lp
+INNER JOIN poem_collections pc ON pc.id = lp.collection_id
+ORDER BY lp.updated_at DESC
+LIMIT 1
+''');
+    if (rows.isEmpty) {
+      return null;
+    }
+    return rows.first['collection_id'] as int?;
+  }
+
+  Future<int?> getLearningProgressPoemId(int collectionId) async {
+    final db = await database;
+    final rows = await db.query(
+      'learning_progress',
+      columns: ['poem_id'],
+      where: 'collection_id = ?',
+      whereArgs: [collectionId],
+      limit: 1,
+    );
+    if (rows.isEmpty) {
+      return null;
+    }
+    return rows.first['poem_id'] as int?;
+  }
+
+  Future<void> saveLearningProgress({
+    required int collectionId,
+    required int poemId,
+  }) async {
+    final db = await database;
+    await db.insert(
+      'learning_progress',
+      {
+        'collection_id': collectionId,
+        'poem_id': poemId,
+        'updated_at': DateTime.now().millisecondsSinceEpoch,
+      },
+      conflictAlgorithm: ConflictAlgorithm.replace,
     );
   }
 
@@ -471,16 +567,71 @@ OR search_provider LIKE ?
   Future<int> createCollection({
     required String name,
     String description = '',
+    bool isFavorites = false,
   }) async {
     final now = DateTime.now();
     final collection = PoemCollection(
       name: name.trim(),
       description: description.trim(),
+      isFavorites: isFavorites,
       createdAt: now,
       updatedAt: now,
     );
     final db = await database;
     return db.insert('poem_collections', collection.toMap());
+  }
+
+  Future<PoemCollection> getOrCreateFavoritesCollection() async {
+    final db = await database;
+    final favoriteRows = await db.query(
+      'poem_collections',
+      where: 'is_favorites = ?',
+      whereArgs: [1],
+      orderBy: 'updated_at DESC, id ASC',
+      limit: 1,
+    );
+    if (favoriteRows.isNotEmpty) {
+      return PoemCollection.fromMap(favoriteRows.first);
+    }
+
+    final namedRows = await db.query(
+      'poem_collections',
+      where: 'name = ?',
+      whereArgs: ['收藏夹'],
+      orderBy: 'updated_at DESC, id ASC',
+      limit: 1,
+    );
+    if (namedRows.isNotEmpty) {
+      final row = namedRows.first;
+      final id = row['id'] as int;
+      await db.update(
+        'poem_collections',
+        {
+          'is_favorites': 1,
+          'updated_at': DateTime.now().millisecondsSinceEpoch,
+        },
+        where: 'id = ?',
+        whereArgs: [id],
+      );
+      final updatedRows = await db.query(
+        'poem_collections',
+        where: 'id = ?',
+        whereArgs: [id],
+        limit: 1,
+      );
+      return PoemCollection.fromMap(updatedRows.first);
+    }
+
+    final now = DateTime.now();
+    final collection = PoemCollection(
+      name: '收藏夹',
+      description: '收藏的诗词',
+      isFavorites: true,
+      createdAt: now,
+      updatedAt: now,
+    );
+    final id = await db.insert('poem_collections', collection.toMap());
+    return collection.copyWith(id: id);
   }
 
   Future<void> updateCollection(PoemCollection collection) async {
@@ -517,7 +668,7 @@ SELECT pe.*, cp.collection_id
 FROM poem_elements pe
 INNER JOIN collection_poems cp ON cp.poem_id = pe.id
 WHERE cp.collection_id = ?
-ORDER BY pe.updated_at DESC, pe.title ASC
+ORDER BY cp.created_at ASC, pe.title ASC
 ''',
         [collectionId],
       );
@@ -534,17 +685,34 @@ WHERE cp.collection_id = ?
 AND (
   pe.title LIKE ?
   OR pe.author LIKE ?
+  OR pe.preface LIKE ?
   OR pe.content LIKE ?
   OR pe.remark LIKE ?
   OR pe.translation LIKE ?
   OR pe.annotation LIKE ?
+  OR pe.learning_note LIKE ?
   OR pe.appreciation LIKE ?
 )
-ORDER BY pe.updated_at DESC, pe.title ASC
+ORDER BY cp.created_at ASC, pe.title ASC
 ''',
-      [collectionId, like, like, like, like, like, like, like],
+      [collectionId, like, like, like, like, like, like, like, like, like],
     );
     return rows.map(Poem.fromMap).toList();
+  }
+
+  Future<Set<int>> getPoemCollectionIds(int poemId) async {
+    final db = await database;
+    final rows = await db.query(
+      'collection_poems',
+      columns: ['collection_id'],
+      where: 'poem_id = ?',
+      whereArgs: [poemId],
+      orderBy: 'created_at ASC',
+    );
+    return rows
+        .map((row) => row['collection_id'])
+        .whereType<int>()
+        .toSet();
   }
 
   Future<int> createPoem({
@@ -552,10 +720,12 @@ ORDER BY pe.updated_at DESC, pe.title ASC
     required String title,
     required String author,
     required String dynasty,
+    String preface = '',
     required String content,
     String remark = '',
     String translation = '',
     String annotation = '',
+    String learningNote = '',
     String appreciation = '',
   }) async {
     final now = DateTime.now();
@@ -566,10 +736,12 @@ ORDER BY pe.updated_at DESC, pe.title ASC
       title: title.trim(),
       author: author.trim(),
       dynasty: dynasty.trim(),
+      preface: preface.trim(),
       content: content.trim(),
       remark: remark.trim(),
       translation: translation.trim(),
       annotation: annotation.trim(),
+      learningNote: learningNote.trim(),
       appreciation: appreciation.trim(),
       createdAt: now,
       updatedAt: now,

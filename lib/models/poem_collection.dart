@@ -3,6 +3,7 @@ class PoemCollection {
     this.id,
     required this.name,
     this.description = '',
+    this.isFavorites = false,
     required this.createdAt,
     required this.updatedAt,
   });
@@ -10,6 +11,7 @@ class PoemCollection {
   final int? id;
   final String name;
   final String description;
+  final bool isFavorites;
   final DateTime createdAt;
   final DateTime updatedAt;
 
@@ -17,6 +19,7 @@ class PoemCollection {
     int? id,
     String? name,
     String? description,
+    bool? isFavorites,
     DateTime? createdAt,
     DateTime? updatedAt,
   }) {
@@ -24,6 +27,7 @@ class PoemCollection {
       id: id ?? this.id,
       name: name ?? this.name,
       description: description ?? this.description,
+      isFavorites: isFavorites ?? this.isFavorites,
       createdAt: createdAt ?? this.createdAt,
       updatedAt: updatedAt ?? this.updatedAt,
     );
@@ -34,6 +38,7 @@ class PoemCollection {
       if (id != null) 'id': id,
       'name': name,
       'description': description,
+      'is_favorites': isFavorites ? 1 : 0,
       'created_at': createdAt.millisecondsSinceEpoch,
       'updated_at': updatedAt.millisecondsSinceEpoch,
     };
@@ -44,10 +49,24 @@ class PoemCollection {
       id: map['id'] as int?,
       name: map['name'] as String,
       description: (map['description'] as String?) ?? '',
+      isFavorites: _boolFromMap(map['is_favorites']),
       createdAt: _dateFromMap(map['created_at']),
       updatedAt: _dateFromMap(map['updated_at']),
     );
   }
+}
+
+bool _boolFromMap(Object? value) {
+  if (value is int) {
+    return value != 0;
+  }
+  if (value is bool) {
+    return value;
+  }
+  if (value is String) {
+    return value == '1' || value.toLowerCase() == 'true';
+  }
+  return false;
 }
 
 DateTime _dateFromMap(Object? value) {

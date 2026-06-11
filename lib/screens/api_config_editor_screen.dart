@@ -577,14 +577,26 @@ class _ApiConfigEditorScreenState extends State<ApiConfigEditorScreen> {
                   const SizedBox(height: 4),
                   SwitchListTile(
                     contentPadding: EdgeInsets.zero,
-                    title: const Text('抓取网页正文'),
-                    subtitle: const Text('更充分，但会增加响应时间和提示词长度'),
+                    title: const Text('Tavily 原始正文'),
+                    subtitle: const Text(
+                      '调用 Tavily 的原生 raw content；此外 App 会自动尝试抓取权威来源正文',
+                    ),
                     value: _searchIncludeRawContent,
                     onChanged: (value) {
                       setState(() {
                         _searchIncludeRawContent = value;
                       });
                     },
+                  ),
+                ] else if (_searchProvider == ApiConfig.searchProviderBocha) ...[
+                  const SizedBox(height: 4),
+                  const ListTile(
+                    contentPadding: EdgeInsets.zero,
+                    leading: Icon(Icons.info_outline),
+                    title: Text('权威网页正文自动抓取'),
+                    subtitle: Text(
+                      '博查接口没有单独的原始正文开关；App 会在搜到古文岛、百度百科等权威页面后自动抓取正文',
+                    ),
                   ),
                 ],
               ],

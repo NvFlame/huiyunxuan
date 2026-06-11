@@ -18,10 +18,12 @@ class _PoemEditorScreenState extends State<PoemEditorScreen> {
   late final TextEditingController _titleController;
   late final TextEditingController _authorController;
   late final TextEditingController _dynastyController;
+  late final TextEditingController _prefaceController;
   late final TextEditingController _contentController;
   late final TextEditingController _remarkController;
   late final TextEditingController _translationController;
   late final TextEditingController _annotationController;
+  late final TextEditingController _learningNoteController;
   late final TextEditingController _appreciationController;
   bool _saving = false;
 
@@ -34,10 +36,12 @@ class _PoemEditorScreenState extends State<PoemEditorScreen> {
     _titleController = TextEditingController(text: poem?.title);
     _authorController = TextEditingController(text: poem?.author);
     _dynastyController = TextEditingController(text: poem?.dynasty);
+    _prefaceController = TextEditingController(text: poem?.preface);
     _contentController = TextEditingController(text: poem?.content);
     _remarkController = TextEditingController(text: poem?.remark);
     _translationController = TextEditingController(text: poem?.translation);
     _annotationController = TextEditingController(text: poem?.annotation);
+    _learningNoteController = TextEditingController(text: poem?.learningNote);
     _appreciationController = TextEditingController(text: poem?.appreciation);
   }
 
@@ -46,10 +50,12 @@ class _PoemEditorScreenState extends State<PoemEditorScreen> {
     _titleController.dispose();
     _authorController.dispose();
     _dynastyController.dispose();
+    _prefaceController.dispose();
     _contentController.dispose();
     _remarkController.dispose();
     _translationController.dispose();
     _annotationController.dispose();
+    _learningNoteController.dispose();
     _appreciationController.dispose();
     super.dispose();
   }
@@ -72,10 +78,12 @@ class _PoemEditorScreenState extends State<PoemEditorScreen> {
         title: _titleController.text,
         author: _authorController.text,
         dynasty: _dynastyController.text,
+        preface: _prefaceController.text,
         content: _contentController.text,
         remark: _remarkController.text,
         translation: _translationController.text,
         annotation: _annotationController.text,
+        learningNote: _learningNoteController.text,
         appreciation: _appreciationController.text,
       );
     } else {
@@ -84,10 +92,12 @@ class _PoemEditorScreenState extends State<PoemEditorScreen> {
           title: _titleController.text.trim(),
           author: _authorController.text.trim(),
           dynasty: _dynastyController.text.trim(),
+          preface: _prefaceController.text.trim(),
           content: _contentController.text.trim(),
           remark: _remarkController.text.trim(),
           translation: _translationController.text.trim(),
           annotation: _annotationController.text.trim(),
+          learningNote: _learningNoteController.text.trim(),
           appreciation: _appreciationController.text.trim(),
         ),
       );
@@ -156,6 +166,18 @@ class _PoemEditorScreenState extends State<PoemEditorScreen> {
               ),
               const SizedBox(height: 12),
               TextFormField(
+                controller: _prefaceController,
+                decoration: const InputDecoration(
+                  labelText: '序 / 小序',
+                  hintText: '例如：丙辰中秋，欢饮达旦，大醉，作此篇，兼怀子由。',
+                  alignLabelWithHint: true,
+                ),
+                minLines: 2,
+                maxLines: 5,
+                keyboardType: TextInputType.multiline,
+              ),
+              const SizedBox(height: 12),
+              TextFormField(
                 controller: _contentController,
                 decoration: const InputDecoration(
                   labelText: '内容',
@@ -169,10 +191,10 @@ class _PoemEditorScreenState extends State<PoemEditorScreen> {
               ),
               const SizedBox(height: 12),
               TextFormField(
-                controller: _translationController,
+                controller: _annotationController,
                 decoration: const InputDecoration(
-                  labelText: '译文',
-                  hintText: '尽量与原文逐句对应，一句译文一行',
+                  labelText: '注释',
+                  hintText: '用 [行号] 开头，一条注释一行',
                   alignLabelWithHint: true,
                 ),
                 minLines: 4,
@@ -181,10 +203,22 @@ class _PoemEditorScreenState extends State<PoemEditorScreen> {
               ),
               const SizedBox(height: 12),
               TextFormField(
-                controller: _annotationController,
+                controller: _learningNoteController,
                 decoration: const InputDecoration(
-                  labelText: '注释',
-                  hintText: '用 [行号] 开头，一条注释一行',
+                  labelText: '学习笔记',
+                  hintText: '记录个人理解、疑问、记忆方法或学习心得',
+                  alignLabelWithHint: true,
+                ),
+                minLines: 4,
+                maxLines: 8,
+                keyboardType: TextInputType.multiline,
+              ),
+              const SizedBox(height: 12),
+              TextFormField(
+                controller: _translationController,
+                decoration: const InputDecoration(
+                  labelText: '译文',
+                  hintText: '尽量与原文逐句对应，一句译文一行',
                   alignLabelWithHint: true,
                 ),
                 minLines: 4,

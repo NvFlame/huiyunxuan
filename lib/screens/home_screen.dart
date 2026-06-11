@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import 'api_settings_screen.dart';
 import 'collection_list_screen.dart';
+import 'learning_mode_screen.dart';
 
 class HomeScreen extends StatelessWidget {
   const HomeScreen({super.key});
@@ -17,7 +18,7 @@ class HomeScreen extends StatelessWidget {
             _HomeSection(
               title: '学习模式',
               icon: Icons.menu_book_outlined,
-              destination: PlaceholderFeatureScreen(title: '学习模式'),
+              destination: LearningModeScreen(),
             ),
             _HomeSection(
               title: '训练模式',
