@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../data/app_database.dart';
 import '../models/poem_collection.dart';
+import 'poem_agent_chat_screen.dart';
 import 'poem_list_screen.dart';
 
 class CollectionListScreen extends StatefulWidget {
@@ -107,6 +108,18 @@ class _CollectionListScreenState extends State<CollectionListScreen> {
     }
   }
 
+  Future<void> _openAgentChat() async {
+    final changed = await Navigator.push<bool>(
+      context,
+      MaterialPageRoute(
+        builder: (context) => const PoemAgentChatScreen(),
+      ),
+    );
+    if (mounted && changed == true) {
+      await _refreshCollections();
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -200,10 +213,26 @@ class _CollectionListScreenState extends State<CollectionListScreen> {
           );
         },
       ),
-      floatingActionButton: FloatingActionButton(
-        onPressed: () => _showCollectionDialog(),
-        tooltip: '添加数据库',
-        child: const Icon(Icons.add),
+      floatingActionButtonLocation: FloatingActionButtonLocation.centerFloat,
+      floatingActionButton: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 8),
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: [
+            FloatingActionButton(
+              heroTag: 'collection_agent_chat',
+              onPressed: _openAgentChat,
+              tooltip: '诗词库助手',
+              child: const Icon(Icons.smart_toy_outlined),
+            ),
+            FloatingActionButton(
+              heroTag: 'collection_add',
+              onPressed: () => _showCollectionDialog(),
+              tooltip: '添加数据库',
+              child: const Icon(Icons.add),
+            ),
+          ],
+        ),
       ),
     );
   }

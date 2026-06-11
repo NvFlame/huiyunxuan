@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../data/app_database.dart';
 import '../models/api_config.dart';
 import '../services/openai_api_service.dart';
+import '../services/web_search_service.dart';
 
 class ApiConfigEditorScreen extends StatefulWidget {
   const ApiConfigEditorScreen({super.key, this.config});
@@ -20,11 +21,19 @@ class _ApiConfigEditorScreenState extends State<ApiConfigEditorScreen> {
   late final TextEditingController _baseUrlController;
   late final TextEditingController _chatModelController;
   late final TextEditingController _embeddingModelController;
+  late final TextEditingController _searchApiKeyController;
+  late final TextEditingController _searchMaxResultsController;
   bool _saving = false;
   bool _showApiKey = false;
+  bool _showSearchApiKey = false;
   bool _loadingModels = false;
   bool _testingApi = false;
+  bool _testingSearch = false;
   late bool _isActive;
+  late String _searchProvider;
+  late String _tavilySearchApiKey;
+  late String _bochaSearchApiKey;
+  late bool _searchIncludeRawContent;
 
   bool get _isEditing => widget.config != null;
 
@@ -41,6 +50,21 @@ class _ApiConfigEditorScreenState extends State<ApiConfigEditorScreen> {
     _embeddingModelController = TextEditingController(
       text: config?.embeddingModel,
     );
+    _searchProvider = config?.searchProvider ?? ApiConfig.searchProviderNone;
+    if (_searchProvider != ApiConfig.searchProviderNone &&
+        _searchProvider != ApiConfig.searchProviderTavily &&
+        _searchProvider != ApiConfig.searchProviderBocha) {
+      _searchProvider = ApiConfig.searchProviderNone;
+    }
+    _tavilySearchApiKey = config?.tavilySearchApiKey ?? '';
+    _bochaSearchApiKey = config?.bochaSearchApiKey ?? '';
+    _searchApiKeyController = TextEditingController(
+      text: _searchApiKeyForProvider(_searchProvider),
+    );
+    _searchMaxResultsController = TextEditingController(
+      text: '${config?.searchMaxResults ?? 5}',
+    );
+    _searchIncludeRawContent = config?.searchIncludeRawContent ?? false;
     _isActive = config?.isActive ?? false;
   }
 
@@ -51,6 +75,8 @@ class _ApiConfigEditorScreenState extends State<ApiConfigEditorScreen> {
     _baseUrlController.dispose();
     _chatModelController.dispose();
     _embeddingModelController.dispose();
+    _searchApiKeyController.dispose();
+    _searchMaxResultsController.dispose();
     super.dispose();
   }
 
@@ -58,6 +84,7 @@ class _ApiConfigEditorScreenState extends State<ApiConfigEditorScreen> {
     if (_saving || !_formKey.currentState!.validate()) {
       return;
     }
+    _rememberCurrentSearchApiKey();
 
     setState(() {
       _saving = true;
@@ -73,6 +100,11 @@ class _ApiConfigEditorScreenState extends State<ApiConfigEditorScreen> {
         baseUrl: _baseUrlController.text,
         chatModel: _chatModelController.text,
         embeddingModel: _embeddingModelController.text,
+        searchProvider: _searchProvider,
+        tavilySearchApiKey: _tavilySearchApiKey,
+        bochaSearchApiKey: _bochaSearchApiKey,
+        searchMaxResults: _readSearchMaxResults(),
+        searchIncludeRawContent: _searchIncludeRawContent,
         isActive: _isActive,
       );
     } else {
@@ -83,6 +115,11 @@ class _ApiConfigEditorScreenState extends State<ApiConfigEditorScreen> {
           baseUrl: _baseUrlController.text,
           chatModel: _chatModelController.text,
           embeddingModel: _embeddingModelController.text,
+          searchProvider: _searchProvider,
+          tavilySearchApiKey: _tavilySearchApiKey,
+          bochaSearchApiKey: _bochaSearchApiKey,
+          searchMaxResults: _readSearchMaxResults(),
+          searchIncludeRawContent: _searchIncludeRawContent,
           isActive: _isActive,
         ),
       );
@@ -168,6 +205,54 @@ class _ApiConfigEditorScreenState extends State<ApiConfigEditorScreen> {
     }
   }
 
+  Future<void> _testSearch() async {
+    if (_testingSearch || !_validateSearchFields()) {
+      return;
+    }
+
+    setState(() {
+      _testingSearch = true;
+    });
+
+    try {
+      final result = await const WebSearchService().search(
+        config: _draftConfig(),
+        query: '王维 使至塞上 全文 译文 注释 赏析',
+      );
+      if (!mounted) {
+        return;
+      }
+
+      final sources = result.sourceLines.take(5).join('\n');
+      await _showResultDialog(
+        title: '搜索测试成功',
+        message: [
+          if (result.answer.trim().isNotEmpty) '摘要：${result.answer}',
+          '结果数：${result.documents.length}',
+          if (sources.trim().isNotEmpty) '来源：\n$sources',
+        ].join('\n\n'),
+      );
+    } on SearchRequestException catch (error) {
+      if (mounted) {
+        await _showResultDialog(
+          title: '搜索测试失败',
+          message: error.toString(),
+          details: error.details,
+        );
+      }
+    } catch (error) {
+      if (mounted) {
+        await _showResultDialog(title: '搜索测试失败', message: error.toString());
+      }
+    } finally {
+      if (mounted) {
+        setState(() {
+          _testingSearch = false;
+        });
+      }
+    }
+  }
+
   bool _validateConnectionFields({bool requireChatModel = false}) {
     final apiKey = _apiKeyController.text.trim();
     final baseUrl = _baseUrlController.text.trim();
@@ -192,7 +277,32 @@ class _ApiConfigEditorScreenState extends State<ApiConfigEditorScreen> {
     return true;
   }
 
+  bool _validateSearchFields() {
+    if (_searchProvider == ApiConfig.searchProviderNone) {
+      _showSnackBar('请先启用联网搜索');
+      return false;
+    }
+    if (_searchProvider != ApiConfig.searchProviderTavily &&
+        _searchProvider != ApiConfig.searchProviderBocha) {
+      _showSnackBar('暂不支持搜索服务：$_searchProvider');
+      return false;
+    }
+    if (_searchApiKeyController.text.trim().isEmpty) {
+      _showSnackBar('请先填写${_searchProviderName()} API Key');
+      return false;
+    }
+    final maxResultsError = _searchMaxResultsValidator(
+      _searchMaxResultsController.text,
+    );
+    if (maxResultsError != null) {
+      _showSnackBar(maxResultsError);
+      return false;
+    }
+    return true;
+  }
+
   ApiConfig _draftConfig() {
+    _rememberCurrentSearchApiKey();
     final now = DateTime.now();
     return ApiConfig(
       id: widget.config?.id,
@@ -203,10 +313,26 @@ class _ApiConfigEditorScreenState extends State<ApiConfigEditorScreen> {
       baseUrl: _baseUrlController.text.trim(),
       chatModel: _chatModelController.text.trim(),
       embeddingModel: _embeddingModelController.text.trim(),
+      searchProvider: _searchProvider,
+      tavilySearchApiKey: _tavilySearchApiKey,
+      bochaSearchApiKey: _bochaSearchApiKey,
+      searchMaxResults: _readSearchMaxResults(),
+      searchIncludeRawContent: _searchIncludeRawContent,
       isActive: _isActive,
       createdAt: widget.config?.createdAt ?? now,
       updatedAt: now,
     );
+  }
+
+  int _readSearchMaxResults() {
+    final parsed = int.tryParse(_searchMaxResultsController.text.trim()) ?? 5;
+    if (parsed < 1) {
+      return 1;
+    }
+    if (parsed > 10) {
+      return 10;
+    }
+    return parsed;
   }
 
   Future<void> _showModelListDialog(List<String> models) async {
@@ -375,6 +501,94 @@ class _ApiConfigEditorScreenState extends State<ApiConfigEditorScreen> {
                 textInputAction: TextInputAction.done,
               ),
               const SizedBox(height: 12),
+              DropdownButtonFormField<String>(
+                value: _searchProvider,
+                decoration: const InputDecoration(labelText: '联网搜索'),
+                items: const [
+                  DropdownMenuItem(
+                    value: ApiConfig.searchProviderNone,
+                    child: Text('不启用'),
+                  ),
+                  DropdownMenuItem(
+                    value: ApiConfig.searchProviderTavily,
+                    child: Text('Tavily'),
+                  ),
+                  DropdownMenuItem(
+                    value: ApiConfig.searchProviderBocha,
+                    child: Text('博查 Bocha'),
+                  ),
+                ],
+                onChanged: (value) {
+                  if (value == null) {
+                    return;
+                  }
+                  _rememberCurrentSearchApiKey();
+                  setState(() {
+                    _searchProvider = value;
+                    _searchApiKeyController.text =
+                        _searchApiKeyForProvider(value);
+                    _showSearchApiKey = false;
+                  });
+                },
+              ),
+              if (_isSearchProviderSelected) ...[
+                const SizedBox(height: 12),
+                TextFormField(
+                  controller: _searchApiKeyController,
+                  obscureText: !_showSearchApiKey,
+                  decoration: InputDecoration(
+                    labelText: '${_searchProviderName()} API Key',
+                    hintText: _searchProvider == ApiConfig.searchProviderTavily
+                        ? 'tvly-...'
+                        : 'sk-...',
+                    suffixIcon: IconButton(
+                      tooltip: _showSearchApiKey ? '隐藏密钥' : '显示密钥',
+                      onPressed: () {
+                        setState(() {
+                          _showSearchApiKey = !_showSearchApiKey;
+                        });
+                      },
+                      icon: Icon(
+                        _showSearchApiKey
+                            ? Icons.visibility_off_outlined
+                            : Icons.visibility_outlined,
+                      ),
+                    ),
+                  ),
+                  textInputAction: TextInputAction.next,
+                  validator: _isSearchProviderSelected
+                      ? _required('请输入${_searchProviderName()} API Key')
+                      : null,
+                ),
+                const SizedBox(height: 12),
+                TextFormField(
+                  controller: _searchMaxResultsController,
+                  decoration: const InputDecoration(
+                    labelText: '搜索结果数',
+                    hintText: '1-10，建议 5',
+                  ),
+                  keyboardType: TextInputType.number,
+                  textInputAction: TextInputAction.done,
+                  validator: _isSearchProviderSelected
+                      ? _searchMaxResultsValidator
+                      : null,
+                ),
+                if (_searchProvider == ApiConfig.searchProviderTavily) ...[
+                  const SizedBox(height: 4),
+                  SwitchListTile(
+                    contentPadding: EdgeInsets.zero,
+                    title: const Text('抓取网页正文'),
+                    subtitle: const Text('更充分，但会增加响应时间和提示词长度'),
+                    value: _searchIncludeRawContent,
+                    onChanged: (value) {
+                      setState(() {
+                        _searchIncludeRawContent = value;
+                      });
+                    },
+                  ),
+                ],
+              ],
+              const SizedBox(height: 12),
               SwitchListTile(
                 contentPadding: EdgeInsets.zero,
                 title: const Text('设为当前默认配置'),
@@ -418,6 +632,19 @@ class _ApiConfigEditorScreenState extends State<ApiConfigEditorScreen> {
                     : const Icon(Icons.api_outlined),
                 label: Text(_testingApi ? '测试中' : '测试API'),
               ),
+              if (_isSearchProviderSelected) ...[
+                const SizedBox(height: 8),
+                OutlinedButton.icon(
+                  onPressed: _testingSearch ? null : _testSearch,
+                  icon: _testingSearch
+                      ? const SizedBox.square(
+                          dimension: 18,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        )
+                      : const Icon(Icons.public),
+                  label: Text(_testingSearch ? '搜索中' : '测试联网搜索'),
+                ),
+              ],
             ],
           ),
         ),
@@ -444,5 +671,55 @@ class _ApiConfigEditorScreenState extends State<ApiConfigEditorScreen> {
       return '请输入有效的 URL';
     }
     return null;
+  }
+
+  String? _searchMaxResultsValidator(String? value) {
+    final parsed = int.tryParse(value?.trim() ?? '');
+    if (parsed == null) {
+      return '请输入 1-10 之间的整数';
+    }
+    if (parsed < 1 || parsed > 10) {
+      return '搜索结果数必须在 1-10 之间';
+    }
+    return null;
+  }
+
+  bool get _isSearchProviderSelected {
+    return _searchProvider == ApiConfig.searchProviderTavily ||
+        _searchProvider == ApiConfig.searchProviderBocha;
+  }
+
+  String _searchProviderName() {
+    switch (_searchProvider) {
+      case ApiConfig.searchProviderTavily:
+        return 'Tavily';
+      case ApiConfig.searchProviderBocha:
+        return '博查';
+      default:
+        return '搜索服务';
+    }
+  }
+
+  void _rememberCurrentSearchApiKey() {
+    final key = _searchApiKeyController.text.trim();
+    switch (_searchProvider) {
+      case ApiConfig.searchProviderTavily:
+        _tavilySearchApiKey = key;
+        break;
+      case ApiConfig.searchProviderBocha:
+        _bochaSearchApiKey = key;
+        break;
+    }
+  }
+
+  String _searchApiKeyForProvider(String provider) {
+    switch (provider) {
+      case ApiConfig.searchProviderTavily:
+        return _tavilySearchApiKey;
+      case ApiConfig.searchProviderBocha:
+        return _bochaSearchApiKey;
+      default:
+        return '';
+    }
   }
 }

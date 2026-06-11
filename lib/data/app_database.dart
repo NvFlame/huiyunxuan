@@ -31,7 +31,7 @@ class AppDatabase {
 
     return openDatabase(
       path,
-      version: 4,
+      version: 8,
       onConfigure: (db) async {
         await db.execute('PRAGMA foreign_keys = ON');
       },
@@ -48,6 +48,7 @@ CREATE TABLE poem_collections (
 
         await _createPoemElementTables(db);
         await _createApiConfigTable(db);
+        await _createPoemAgentMessageTable(db);
       },
       onUpgrade: (db, oldVersion, newVersion) async {
         if (oldVersion < 2) {
@@ -64,7 +65,70 @@ CREATE TABLE poem_collections (
         if (oldVersion < 4) {
           await _createApiConfigTable(db);
         }
+        if (oldVersion >= 3 && oldVersion < 5) {
+          await db.execute(
+            "ALTER TABLE poem_elements ADD COLUMN translation TEXT NOT NULL DEFAULT ''",
+          );
+        }
+        if (oldVersion >= 4 && oldVersion < 6) {
+          await db.execute(
+            "ALTER TABLE api_configs ADD COLUMN search_provider TEXT NOT NULL DEFAULT '${ApiConfig.searchProviderNone}'",
+          );
+          await db.execute(
+            "ALTER TABLE api_configs ADD COLUMN search_api_key TEXT NOT NULL DEFAULT ''",
+          );
+          await db.execute(
+            'ALTER TABLE api_configs ADD COLUMN search_max_results INTEGER NOT NULL DEFAULT 5',
+          );
+          await db.execute(
+            'ALTER TABLE api_configs ADD COLUMN search_include_raw_content INTEGER NOT NULL DEFAULT 0',
+          );
+        }
+        if (oldVersion >= 4 && oldVersion < 7) {
+          await db.execute(
+            "ALTER TABLE api_configs ADD COLUMN tavily_search_api_key TEXT NOT NULL DEFAULT ''",
+          );
+          await db.execute(
+            "ALTER TABLE api_configs ADD COLUMN bocha_search_api_key TEXT NOT NULL DEFAULT ''",
+          );
+          await db.execute(
+            '''
+UPDATE api_configs
+SET tavily_search_api_key = search_api_key
+WHERE search_provider = '${ApiConfig.searchProviderTavily}'
+AND search_api_key != ''
+''',
+          );
+          await db.execute(
+            '''
+UPDATE api_configs
+SET bocha_search_api_key = search_api_key
+WHERE search_provider = '${ApiConfig.searchProviderBocha}'
+AND search_api_key != ''
+            ''',
+          );
+        }
+        if (oldVersion < 8) {
+          await _createPoemAgentMessageTable(db);
+        }
       },
+    );
+  }
+
+  Future<void> _createPoemAgentMessageTable(DatabaseExecutor db) async {
+    await db.execute('''
+CREATE TABLE IF NOT EXISTS poem_agent_messages (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  scope_key TEXT NOT NULL,
+  role TEXT NOT NULL,
+  content TEXT NOT NULL,
+  created_at INTEGER NOT NULL
+)
+''');
+
+    await db.execute(
+      'CREATE INDEX IF NOT EXISTS idx_poem_agent_messages_scope '
+      'ON poem_agent_messages(scope_key, created_at, id)',
     );
   }
 
@@ -78,6 +142,12 @@ CREATE TABLE api_configs (
   base_url TEXT NOT NULL DEFAULT '',
   chat_model TEXT NOT NULL DEFAULT '',
   embedding_model TEXT NOT NULL DEFAULT '',
+  search_provider TEXT NOT NULL DEFAULT '${ApiConfig.searchProviderNone}',
+  search_api_key TEXT NOT NULL DEFAULT '',
+  tavily_search_api_key TEXT NOT NULL DEFAULT '',
+  bocha_search_api_key TEXT NOT NULL DEFAULT '',
+  search_max_results INTEGER NOT NULL DEFAULT 5,
+  search_include_raw_content INTEGER NOT NULL DEFAULT 0,
   is_active INTEGER NOT NULL DEFAULT 0,
   created_at INTEGER NOT NULL,
   updated_at INTEGER NOT NULL
@@ -100,6 +170,7 @@ CREATE TABLE poem_elements (
   dynasty TEXT NOT NULL DEFAULT '',
   content TEXT NOT NULL,
   remark TEXT NOT NULL DEFAULT '',
+  translation TEXT NOT NULL DEFAULT '',
   annotation TEXT NOT NULL DEFAULT '',
   appreciation TEXT NOT NULL DEFAULT '',
   created_at INTEGER NOT NULL,
@@ -154,6 +225,7 @@ CREATE TABLE collection_poems (
         'dynasty': oldPoem['dynasty'] ?? '',
         'content': oldPoem['content'],
         'remark': oldPoem['remark'] ?? '',
+        'translation': '',
         'annotation': oldPoem['annotation'] ?? '',
         'appreciation': oldPoem['appreciation'] ?? '',
         'created_at': createdAt,
@@ -199,11 +271,76 @@ name LIKE ?
 OR base_url LIKE ?
 OR chat_model LIKE ?
 OR embedding_model LIKE ?
+OR search_provider LIKE ?
 ''',
-      whereArgs: [like, like, like, like],
+      whereArgs: [like, like, like, like, like],
       orderBy: 'is_active DESC, updated_at DESC, name ASC',
     );
     return rows.map(ApiConfig.fromMap).toList();
+  }
+
+  Future<ApiConfig?> getActiveApiConfig() async {
+    final db = await database;
+    final activeRows = await db.query(
+      'api_configs',
+      where: 'is_active = ?',
+      whereArgs: [1],
+      orderBy: 'updated_at DESC, name ASC',
+      limit: 1,
+    );
+    if (activeRows.isNotEmpty) {
+      return ApiConfig.fromMap(activeRows.first);
+    }
+
+    final rows = await db.query(
+      'api_configs',
+      orderBy: 'updated_at DESC, name ASC',
+      limit: 1,
+    );
+    if (rows.isEmpty) {
+      return null;
+    }
+    return ApiConfig.fromMap(rows.first);
+  }
+
+  Future<List<Map<String, Object?>>> getPoemAgentMessages(
+    String scopeKey,
+  ) async {
+    final db = await database;
+    return db.query(
+      'poem_agent_messages',
+      columns: ['role', 'content'],
+      where: 'scope_key = ?',
+      whereArgs: [scopeKey],
+      orderBy: 'created_at ASC, id ASC',
+    );
+  }
+
+  Future<void> addPoemAgentMessage({
+    required String scopeKey,
+    required String role,
+    required String content,
+  }) async {
+    if (content.trim().isEmpty) {
+      return;
+    }
+
+    final db = await database;
+    await db.insert('poem_agent_messages', {
+      'scope_key': scopeKey,
+      'role': role,
+      'content': content,
+      'created_at': DateTime.now().millisecondsSinceEpoch,
+    });
+  }
+
+  Future<void> clearPoemAgentMessages(String scopeKey) async {
+    final db = await database;
+    await db.delete(
+      'poem_agent_messages',
+      where: 'scope_key = ?',
+      whereArgs: [scopeKey],
+    );
   }
 
   Future<int> createApiConfig({
@@ -212,6 +349,11 @@ OR embedding_model LIKE ?
     required String baseUrl,
     required String chatModel,
     String embeddingModel = '',
+    String searchProvider = ApiConfig.searchProviderNone,
+    String tavilySearchApiKey = '',
+    String bochaSearchApiKey = '',
+    int searchMaxResults = 5,
+    bool searchIncludeRawContent = false,
     bool isActive = false,
   }) async {
     final now = DateTime.now();
@@ -227,6 +369,11 @@ OR embedding_model LIKE ?
       baseUrl: _normalizeBaseUrl(baseUrl),
       chatModel: chatModel.trim(),
       embeddingModel: embeddingModel.trim(),
+      searchProvider: searchProvider,
+      tavilySearchApiKey: tavilySearchApiKey.trim(),
+      bochaSearchApiKey: bochaSearchApiKey.trim(),
+      searchMaxResults: _normalizeSearchMaxResults(searchMaxResults),
+      searchIncludeRawContent: searchIncludeRawContent,
       isActive: isActive || existingCount == 0,
       createdAt: now,
       updatedAt: now,
@@ -252,6 +399,11 @@ OR embedding_model LIKE ?
       baseUrl: _normalizeBaseUrl(config.baseUrl),
       chatModel: config.chatModel.trim(),
       embeddingModel: config.embeddingModel.trim(),
+      searchProvider: config.searchProvider,
+      tavilySearchApiKey: config.tavilySearchApiKey.trim(),
+      bochaSearchApiKey: config.bochaSearchApiKey.trim(),
+      searchMaxResults: _normalizeSearchMaxResults(config.searchMaxResults),
+      searchIncludeRawContent: config.searchIncludeRawContent,
       updatedAt: DateTime.now(),
     );
     final db = await database;
@@ -384,12 +536,13 @@ AND (
   OR pe.author LIKE ?
   OR pe.content LIKE ?
   OR pe.remark LIKE ?
+  OR pe.translation LIKE ?
   OR pe.annotation LIKE ?
   OR pe.appreciation LIKE ?
 )
 ORDER BY pe.updated_at DESC, pe.title ASC
 ''',
-      [collectionId, like, like, like, like, like, like],
+      [collectionId, like, like, like, like, like, like, like],
     );
     return rows.map(Poem.fromMap).toList();
   }
@@ -401,6 +554,7 @@ ORDER BY pe.updated_at DESC, pe.title ASC
     required String dynasty,
     required String content,
     String remark = '',
+    String translation = '',
     String annotation = '',
     String appreciation = '',
   }) async {
@@ -414,6 +568,7 @@ ORDER BY pe.updated_at DESC, pe.title ASC
       dynasty: dynasty.trim(),
       content: content.trim(),
       remark: remark.trim(),
+      translation: translation.trim(),
       annotation: annotation.trim(),
       appreciation: appreciation.trim(),
       createdAt: now,
@@ -613,4 +768,14 @@ String _normalizeBaseUrl(String value) {
     normalized = normalized.substring(0, normalized.length - 1);
   }
   return normalized;
+}
+
+int _normalizeSearchMaxResults(int value) {
+  if (value < 1) {
+    return 1;
+  }
+  if (value > 10) {
+    return 10;
+  }
+  return value;
 }

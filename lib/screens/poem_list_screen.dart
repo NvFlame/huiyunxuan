@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../data/app_database.dart';
 import '../models/poem.dart';
 import '../models/poem_collection.dart';
+import 'poem_agent_chat_screen.dart';
 import 'poem_editor_screen.dart';
 
 class PoemListScreen extends StatefulWidget {
@@ -17,10 +18,16 @@ class PoemListScreen extends StatefulWidget {
 class _PoemListScreenState extends State<PoemListScreen> {
   final _searchController = TextEditingController();
   final Set<int> _selectedPoemIds = <int>{};
+  List<int> _visiblePoemIds = const <int>[];
   late Future<List<Poem>> _poemsFuture;
 
   int get _collectionId => widget.collection.id!;
   bool get _isSelecting => _selectedPoemIds.isNotEmpty;
+  bool get _hasVisiblePoems => _visiblePoemIds.isNotEmpty;
+  bool get _isAllVisibleSelected {
+    return _hasVisiblePoems &&
+        _visiblePoemIds.every(_selectedPoemIds.contains);
+  }
 
   @override
   void initState() {
@@ -35,10 +42,34 @@ class _PoemListScreenState extends State<PoemListScreen> {
   }
 
   void _loadPoems() {
-    _poemsFuture = AppDatabase.instance.getPoems(
+    final future = AppDatabase.instance.getPoems(
       _collectionId,
       query: _searchController.text,
     );
+    _poemsFuture = future;
+    future.then((poems) {
+      if (!mounted || _poemsFuture != future) {
+        return;
+      }
+
+      final visibleIds = poems
+          .map((poem) => poem.id)
+          .whereType<int>()
+          .toList(growable: false);
+      final visibleIdSet = visibleIds.toSet();
+      setState(() {
+        _visiblePoemIds = visibleIds;
+        _selectedPoemIds.removeWhere((id) => !visibleIdSet.contains(id));
+      });
+    }).catchError((_) {
+      if (!mounted || _poemsFuture != future) {
+        return;
+      }
+      setState(() {
+        _visiblePoemIds = const <int>[];
+        _selectedPoemIds.clear();
+      });
+    });
   }
 
   Future<void> _refreshPoems() async {
@@ -74,6 +105,22 @@ class _PoemListScreenState extends State<PoemListScreen> {
 
   void _clearSelection() {
     setState(_selectedPoemIds.clear);
+  }
+
+  void _toggleSelectAllVisible() {
+    if (!_hasVisiblePoems) {
+      return;
+    }
+
+    setState(() {
+      if (_isAllVisibleSelected) {
+        _selectedPoemIds.clear();
+      } else {
+        _selectedPoemIds
+          ..clear()
+          ..addAll(_visiblePoemIds);
+      }
+    });
   }
 
   void _copySelectedPoems() {
@@ -211,6 +258,19 @@ class _PoemListScreenState extends State<PoemListScreen> {
     }
   }
 
+  Future<void> _openAgentChat() async {
+    final changed = await Navigator.push<bool>(
+      context,
+      MaterialPageRoute(
+        builder: (context) =>
+            PoemAgentChatScreen(currentCollection: widget.collection),
+      ),
+    );
+    if (changed == true && mounted) {
+      await _refreshPoems();
+    }
+  }
+
   Future<void> _deletePoem(Poem poem) async {
     final confirmed = await showDialog<bool>(
       context: context,
@@ -264,7 +324,7 @@ class _PoemListScreenState extends State<PoemListScreen> {
                         },
                         icon: const Icon(Icons.close),
                       ),
-                labelText: '搜索标题、作者、内容、备注、注释或赏析',
+                labelText: '搜索标题、作者、内容、备注、译文、注释或赏析',
               ),
               onChanged: (_) => _refreshPoems(),
             ),
@@ -337,12 +397,28 @@ class _PoemListScreenState extends State<PoemListScreen> {
           ),
         ],
       ),
+      floatingActionButtonLocation: FloatingActionButtonLocation.centerFloat,
       floatingActionButton: _isSelecting
           ? null
-          : FloatingActionButton(
-              onPressed: () => _openEditor(),
-              tooltip: '添加原创诗词',
-              child: const Icon(Icons.add),
+          : Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 8),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  FloatingActionButton(
+                    heroTag: 'poem_agent_chat_${widget.collection.id}',
+                    onPressed: _openAgentChat,
+                    tooltip: '诗词库助手',
+                    child: const Icon(Icons.smart_toy_outlined),
+                  ),
+                  FloatingActionButton(
+                    heroTag: 'poem_add_${widget.collection.id}',
+                    onPressed: () => _openEditor(),
+                    tooltip: '添加原创诗词',
+                    child: const Icon(Icons.add),
+                  ),
+                ],
+              ),
             ),
     );
   }
@@ -357,6 +433,13 @@ class _PoemListScreenState extends State<PoemListScreen> {
         ),
         title: Text('已选择 ${_selectedPoemIds.length} 首'),
         actions: [
+          IconButton(
+            tooltip: _isAllVisibleSelected ? '取消全选' : '全选',
+            onPressed: _hasVisiblePoems ? _toggleSelectAllVisible : null,
+            icon: Icon(
+              _isAllVisibleSelected ? Icons.clear_all : Icons.select_all,
+            ),
+          ),
           IconButton(
             tooltip: '复制',
             onPressed: _copySelectedPoems,

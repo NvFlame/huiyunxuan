@@ -79,6 +79,44 @@ class OpenAiApiService {
     );
   }
 
+  Future<String> createChatCompletion({
+    required ApiConfig config,
+    required List<Map<String, String>> messages,
+    double temperature = 0.2,
+  }) async {
+    final response = await _request(
+      config: config,
+      method: 'POST',
+      path: '/chat/completions',
+      body: {
+        'model': config.chatModel,
+        'messages': messages,
+        'temperature': temperature,
+      },
+    );
+
+    final choices = response['choices'];
+    if (choices is! List || choices.isEmpty) {
+      throw const ApiRequestException(message: '请求成功，但响应中没有 choices。');
+    }
+
+    final firstChoice = choices.first;
+    Object? content;
+    if (firstChoice is Map<String, Object?>) {
+      final message = firstChoice['message'];
+      if (message is Map<String, Object?>) {
+        content = message['content'];
+      }
+    } else if (firstChoice is Map) {
+      final message = firstChoice['message'];
+      if (message is Map) {
+        content = message['content'];
+      }
+    }
+
+    return _readContent(content);
+  }
+
   Future<Map<String, Object?>> _request({
     required ApiConfig config,
     required String method,

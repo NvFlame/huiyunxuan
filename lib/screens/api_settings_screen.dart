@@ -278,6 +278,12 @@ class _ApiConfigCard extends StatelessWidget {
                         icon: Icons.psychology_outlined,
                         text: config.embeddingModel,
                       ),
+                    _ApiInfoLine(
+                      icon: Icons.public,
+                      text: config.isSearchEnabled
+                          ? '${config.searchProvider} 搜索已启用'
+                          : '未启用联网搜索',
+                    ),
                   ],
                 ),
               ),

@@ -8,6 +8,7 @@ class Poem {
     required this.dynasty,
     required this.content,
     this.remark = '',
+    this.translation = '',
     this.annotation = '',
     this.appreciation = '',
     required this.createdAt,
@@ -22,6 +23,7 @@ class Poem {
   final String dynasty;
   final String content;
   final String remark;
+  final String translation;
   final String annotation;
   final String appreciation;
   final DateTime createdAt;
@@ -36,6 +38,7 @@ class Poem {
     String? dynasty,
     String? content,
     String? remark,
+    String? translation,
     String? annotation,
     String? appreciation,
     DateTime? createdAt,
@@ -50,6 +53,7 @@ class Poem {
       dynasty: dynasty ?? this.dynasty,
       content: content ?? this.content,
       remark: remark ?? this.remark,
+      translation: translation ?? this.translation,
       annotation: annotation ?? this.annotation,
       appreciation: appreciation ?? this.appreciation,
       createdAt: createdAt ?? this.createdAt,
@@ -66,6 +70,7 @@ class Poem {
       'dynasty': dynasty,
       'content': content,
       'remark': remark,
+      'translation': translation,
       'annotation': annotation,
       'appreciation': appreciation,
       'created_at': createdAt.millisecondsSinceEpoch,
@@ -83,6 +88,7 @@ class Poem {
       dynasty: (map['dynasty'] as String?) ?? '',
       content: map['content'] as String,
       remark: (map['remark'] as String?) ?? '',
+      translation: (map['translation'] as String?) ?? '',
       annotation: (map['annotation'] as String?) ?? '',
       appreciation: (map['appreciation'] as String?) ?? '',
       createdAt: _dateFromMap(map['created_at']),
