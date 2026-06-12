@@ -31,7 +31,7 @@ class AppDatabase {
 
     return openDatabase(
       path,
-      version: 11,
+      version: 12,
       onConfigure: (db) async {
         await db.execute('PRAGMA foreign_keys = ON');
       },
@@ -51,6 +51,7 @@ CREATE TABLE poem_collections (
         await _createApiConfigTable(db);
         await _createPoemAgentMessageTable(db);
         await _createLearningProgressTable(db);
+        await _createTrainingTables(db);
       },
       onUpgrade: (db, oldVersion, newVersion) async {
         if (oldVersion < 2) {
@@ -130,6 +131,9 @@ AND search_api_key != ''
           await db.execute(
             'ALTER TABLE poem_collections ADD COLUMN is_favorites INTEGER NOT NULL DEFAULT 0',
           );
+        }
+        if (oldVersion < 12) {
+          await _createTrainingTables(db);
         }
       },
     );
@@ -249,6 +253,44 @@ CREATE TABLE IF NOT EXISTS learning_progress (
     await db.execute(
       'CREATE INDEX IF NOT EXISTS idx_learning_progress_updated_at '
       'ON learning_progress(updated_at)',
+    );
+  }
+
+  Future<void> _createTrainingTables(DatabaseExecutor db) async {
+    await db.execute('''
+CREATE TABLE IF NOT EXISTS training_progress (
+  collection_id INTEGER PRIMARY KEY,
+  poem_id INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL,
+  FOREIGN KEY (collection_id)
+    REFERENCES poem_collections (id)
+    ON DELETE CASCADE,
+  FOREIGN KEY (poem_id)
+    REFERENCES poem_elements (id)
+    ON DELETE CASCADE
+)
+''');
+
+    await db.execute(
+      'CREATE INDEX IF NOT EXISTS idx_training_progress_updated_at '
+      'ON training_progress(updated_at)',
+    );
+
+    await db.execute('''
+CREATE TABLE IF NOT EXISTS training_achievements (
+  poem_id INTEGER PRIMARY KEY,
+  highest_level INTEGER NOT NULL DEFAULT 0,
+  first_jinshi_at INTEGER,
+  updated_at INTEGER NOT NULL,
+  FOREIGN KEY (poem_id)
+    REFERENCES poem_elements (id)
+    ON DELETE CASCADE
+)
+''');
+
+    await db.execute(
+      'CREATE INDEX IF NOT EXISTS idx_training_achievements_level '
+      'ON training_achievements(highest_level)',
     );
   }
 
@@ -437,6 +479,142 @@ LIMIT 1
       },
       conflictAlgorithm: ConflictAlgorithm.replace,
     );
+  }
+
+  Future<int?> getLastTrainingCollectionId() async {
+    final db = await database;
+    final rows = await db.rawQuery('''
+SELECT tp.collection_id
+FROM training_progress tp
+INNER JOIN poem_collections pc ON pc.id = tp.collection_id
+ORDER BY tp.updated_at DESC
+LIMIT 1
+''');
+    if (rows.isEmpty) {
+      return null;
+    }
+    return rows.first['collection_id'] as int?;
+  }
+
+  Future<int?> getTrainingProgressPoemId(int collectionId) async {
+    final db = await database;
+    final rows = await db.query(
+      'training_progress',
+      columns: ['poem_id'],
+      where: 'collection_id = ?',
+      whereArgs: [collectionId],
+      limit: 1,
+    );
+    if (rows.isEmpty) {
+      return null;
+    }
+    return rows.first['poem_id'] as int?;
+  }
+
+  Future<void> saveTrainingProgress({
+    required int collectionId,
+    required int poemId,
+  }) async {
+    final db = await database;
+    await db.insert(
+      'training_progress',
+      {
+        'collection_id': collectionId,
+        'poem_id': poemId,
+        'updated_at': DateTime.now().millisecondsSinceEpoch,
+      },
+      conflictAlgorithm: ConflictAlgorithm.replace,
+    );
+  }
+
+  Future<Map<int, int>> getTrainingAchievements(
+    Iterable<int> poemIds,
+  ) async {
+    final ids = poemIds.toSet();
+    if (ids.isEmpty) {
+      return const <int, int>{};
+    }
+
+    final db = await database;
+    final placeholders = List.filled(ids.length, '?').join(', ');
+    final rows = await db.rawQuery(
+      '''
+SELECT poem_id, highest_level
+FROM training_achievements
+WHERE poem_id IN ($placeholders)
+''',
+      ids.toList(),
+    );
+
+    return {
+      for (final row in rows)
+        if (row['poem_id'] is int && row['highest_level'] is int)
+          row['poem_id'] as int: row['highest_level'] as int,
+    };
+  }
+
+  Future<int> saveTrainingAchievement({
+    required int poemId,
+    required int level,
+  }) async {
+    final normalizedLevel = level.clamp(0, 4).toInt();
+    final db = await database;
+    final now = DateTime.now().millisecondsSinceEpoch;
+    var finalLevel = normalizedLevel;
+
+    await db.transaction((txn) async {
+      final rows = await txn.query(
+        'training_achievements',
+        where: 'poem_id = ?',
+        whereArgs: [poemId],
+        limit: 1,
+      );
+
+      if (rows.isEmpty) {
+        await txn.insert('training_achievements', {
+          'poem_id': poemId,
+          'highest_level': normalizedLevel,
+          'first_jinshi_at': normalizedLevel >= 4 ? now : null,
+          'updated_at': now,
+        });
+        return;
+      }
+
+      final currentLevel = (rows.first['highest_level'] as int?) ?? 0;
+      finalLevel = currentLevel > normalizedLevel
+          ? currentLevel
+          : normalizedLevel;
+      if (finalLevel == currentLevel) {
+        await txn.update(
+          'training_achievements',
+          {'updated_at': now},
+          where: 'poem_id = ?',
+          whereArgs: [poemId],
+        );
+        return;
+      }
+
+      await txn.update(
+        'training_achievements',
+        {
+          'highest_level': finalLevel,
+          if (finalLevel >= 4 && currentLevel < 4) 'first_jinshi_at': now,
+          'updated_at': now,
+        },
+        where: 'poem_id = ?',
+        whereArgs: [poemId],
+      );
+    });
+
+    return finalLevel;
+  }
+
+  Future<int> getJinshiPointCount() async {
+    final db = await database;
+    final rows = await db.rawQuery(
+      'SELECT COUNT(*) FROM training_achievements WHERE first_jinshi_at IS NOT NULL',
+    );
+    return Sqflite.firstIntValue(rows) ?? 0;
   }
 
   Future<int> createApiConfig({
