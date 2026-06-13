@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../data/app_database.dart';
 import '../models/poem_collection.dart';
+import '../services/poem_import_service.dart';
 import 'poem_agent_chat_screen.dart';
 import 'poem_list_screen.dart';
 
@@ -31,7 +32,7 @@ class _CollectionListScreenState extends State<CollectionListScreen> {
   }
 
   Future<void> _showCollectionDialog({PoemCollection? collection}) async {
-    final result = await showDialog<_CollectionDraft>(
+    final result = await showDialog<_CollectionDialogResult>(
       context: context,
       builder: (context) {
         return _CollectionDialog(collection: collection);
@@ -42,14 +43,24 @@ class _CollectionListScreenState extends State<CollectionListScreen> {
       return;
     }
 
+    if (result.action == _CollectionDialogAction.importCollection) {
+      await _showImportCollectionDialog();
+      return;
+    }
+
+    final draft = result.draft;
+    if (draft == null) {
+      return;
+    }
+
     if (collection == null) {
       await AppDatabase.instance.createCollection(
-        name: result.name,
-        description: result.description,
+        name: draft.name,
+        description: draft.description,
       );
     } else {
       await AppDatabase.instance.updateCollection(
-        collection.copyWith(name: result.name, description: result.description),
+        collection.copyWith(name: draft.name, description: draft.description),
       );
     }
 
@@ -57,6 +68,52 @@ class _CollectionListScreenState extends State<CollectionListScreen> {
       return;
     }
     await _refreshCollections();
+  }
+
+  Future<void> _showImportCollectionDialog() async {
+    final result = await showDialog<_CollectionImportResult>(
+      context: context,
+      builder: (context) => const _CollectionImportDialog(),
+    );
+    if (result == null) {
+      return;
+    }
+
+    final collectionId = await AppDatabase.instance.createCollection(
+      name: result.collection.name,
+      description: result.collection.description,
+    );
+    for (final poem in result.collection.poems) {
+      await AppDatabase.instance.createPoem(
+        collectionId: collectionId,
+        title: poem.title,
+        author: poem.author,
+        dynasty: poem.dynasty,
+        preface: poem.preface,
+        content: poem.content,
+        remark: poem.remark,
+        translation: poem.translation,
+        annotation: poem.annotation,
+        learningNote: poem.learningNote,
+        appreciation: poem.appreciation,
+      );
+    }
+
+    if (!mounted) {
+      return;
+    }
+    await _refreshCollections();
+    if (mounted) {
+      ScaffoldMessenger.of(context)
+        ..hideCurrentSnackBar()
+        ..showSnackBar(
+          SnackBar(
+            content: Text(
+              '已导入“${result.collection.name}”，共 ${result.collection.poems.length} 首诗词',
+            ),
+          ),
+        );
+    }
   }
 
   Future<void> _deleteCollection(PoemCollection collection) async {
@@ -240,6 +297,19 @@ class _CollectionListScreenState extends State<CollectionListScreen> {
 
 enum _CollectionAction { edit, delete }
 
+enum _CollectionDialogAction { save, importCollection }
+
+class _CollectionDialogResult {
+  const _CollectionDialogResult.save(this.draft)
+      : action = _CollectionDialogAction.save;
+  const _CollectionDialogResult.importCollection()
+      : action = _CollectionDialogAction.importCollection,
+        draft = null;
+
+  final _CollectionDialogAction action;
+  final _CollectionDraft? draft;
+}
+
 class _CollectionDraft {
   const _CollectionDraft({required this.name, required this.description});
 
@@ -284,9 +354,11 @@ class _CollectionDialogState extends State<_CollectionDialog> {
 
     Navigator.pop(
       context,
-      _CollectionDraft(
-        name: _nameController.text.trim(),
-        description: _descriptionController.text.trim(),
+      _CollectionDialogResult.save(
+        _CollectionDraft(
+          name: _nameController.text.trim(),
+          description: _descriptionController.text.trim(),
+        ),
       ),
     );
   }
@@ -328,11 +400,189 @@ class _CollectionDialogState extends State<_CollectionDialog> {
         ),
       ),
       actions: [
+        if (!isEditing)
+          TextButton.icon(
+            onPressed: () {
+              Navigator.pop(
+                context,
+                const _CollectionDialogResult.importCollection(),
+              );
+            },
+            icon: const Icon(Icons.upload_file_outlined),
+            label: const Text('导入'),
+          ),
         TextButton(
           onPressed: () => Navigator.pop(context),
           child: const Text('取消'),
         ),
         FilledButton(onPressed: _submit, child: const Text('保存')),
+      ],
+    );
+  }
+}
+
+class _CollectionImportResult {
+  const _CollectionImportResult({required this.collection});
+
+  final ImportedCollectionDraft collection;
+}
+
+class _CollectionImportDialog extends StatefulWidget {
+  const _CollectionImportDialog();
+
+  @override
+  State<_CollectionImportDialog> createState() => _CollectionImportDialogState();
+}
+
+class _CollectionImportDialogState extends State<_CollectionImportDialog> {
+  final _nameController = TextEditingController();
+  final _descriptionController = TextEditingController();
+  final _textController = TextEditingController();
+  String? _errorText;
+  bool _pickingFile = false;
+
+  @override
+  void dispose() {
+    _nameController.dispose();
+    _descriptionController.dispose();
+    _textController.dispose();
+    super.dispose();
+  }
+
+  void _submit() {
+    try {
+      final collection = parsePoemCollectionImport(
+        _textController.text,
+        fallbackName: _nameController.text,
+        fallbackDescription: _descriptionController.text,
+      );
+      if (collection.name.trim().isEmpty) {
+        setState(() {
+          _errorText = '请输入数据库名称，或在 JSON 中提供 name 字段';
+        });
+        return;
+      }
+      Navigator.pop(
+        context,
+        _CollectionImportResult(collection: collection),
+      );
+    } on FormatException catch (error) {
+      setState(() {
+        _errorText = error.message;
+      });
+    } catch (error) {
+      setState(() {
+        _errorText = error.toString();
+      });
+    }
+  }
+
+  Future<void> _pickFile() async {
+    setState(() {
+      _pickingFile = true;
+      _errorText = null;
+    });
+    try {
+      final text = await pickPoemImportFileText();
+      if (!mounted) {
+        return;
+      }
+      if (text != null) {
+        setState(() {
+          _textController.text = text;
+        });
+      }
+    } on FormatException catch (error) {
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _errorText = error.message;
+      });
+    } catch (error) {
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _errorText = error.toString();
+      });
+    } finally {
+      if (mounted) {
+        setState(() {
+          _pickingFile = false;
+        });
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: const Text('导入诗词库'),
+      content: SizedBox(
+        width: double.maxFinite,
+        child: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              TextField(
+                controller: _nameController,
+                decoration: const InputDecoration(
+                  labelText: '数据库名称',
+                  hintText: 'JSON 中已有 name 时可不填',
+                ),
+                textInputAction: TextInputAction.next,
+              ),
+              const SizedBox(height: 12),
+              TextField(
+                controller: _descriptionController,
+                decoration: const InputDecoration(
+                  labelText: '说明',
+                  hintText: '可选',
+                ),
+                maxLines: 2,
+              ),
+              const SizedBox(height: 12),
+              Align(
+                alignment: Alignment.centerLeft,
+                child: OutlinedButton.icon(
+                  onPressed: _pickingFile ? null : _pickFile,
+                  icon: _pickingFile
+                      ? const SizedBox.square(
+                          dimension: 16,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        )
+                      : const Icon(Icons.folder_open_outlined),
+                  label: Text(_pickingFile ? '读取中' : '选择 JSON / JSONL 文件'),
+                ),
+              ),
+              const SizedBox(height: 12),
+              TextField(
+                controller: _textController,
+                decoration: InputDecoration(
+                  labelText: 'JSON / JSONL',
+                  hintText: '{"name":"唐诗三百首","poems":[...]}',
+                  alignLabelWithHint: true,
+                  errorText: _errorText,
+                ),
+                minLines: 8,
+                maxLines: 14,
+                keyboardType: TextInputType.multiline,
+              ),
+            ],
+          ),
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context),
+          child: const Text('取消'),
+        ),
+        FilledButton.icon(
+          onPressed: _submit,
+          icon: const Icon(Icons.upload_file_outlined),
+          label: const Text('导入'),
+        ),
       ],
     );
   }

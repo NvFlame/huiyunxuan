@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../data/app_database.dart';
 import '../models/poem.dart';
+import '../services/poem_import_service.dart';
 
 class PoemEditorScreen extends StatefulWidget {
   const PoemEditorScreen({super.key, required this.collectionId, this.poem});
@@ -108,12 +109,44 @@ class _PoemEditorScreenState extends State<PoemEditorScreen> {
     }
   }
 
+  Future<void> _importPoemDraft() async {
+    final draft = await showDialog<ImportedPoemDraft>(
+      context: context,
+      builder: (context) => const _SinglePoemImportDialog(),
+    );
+    if (draft == null || !mounted) {
+      return;
+    }
+
+    setState(() {
+      _titleController.text = draft.title;
+      _authorController.text = draft.author;
+      _dynastyController.text = draft.dynasty;
+      _prefaceController.text = draft.preface;
+      _contentController.text = draft.content;
+      _remarkController.text = draft.remark;
+      _translationController.text = draft.translation;
+      _annotationController.text = draft.annotation;
+      _learningNoteController.text = draft.learningNote;
+      _appreciationController.text = draft.appreciation;
+    });
+
+    ScaffoldMessenger.of(context)
+      ..hideCurrentSnackBar()
+      ..showSnackBar(const SnackBar(content: Text('已导入到当前表单')));
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
         title: Text(_isEditing ? '编辑诗词' : '添加原创诗词'),
         actions: [
+          IconButton(
+            tooltip: '导入诗词',
+            onPressed: _saving ? null : _importPoemDraft,
+            icon: const Icon(Icons.upload_file_outlined),
+          ),
           IconButton(
             tooltip: '保存',
             onPressed: _saving ? null : _savePoem,
@@ -262,5 +295,131 @@ class _PoemEditorScreenState extends State<PoemEditorScreen> {
       }
       return null;
     };
+  }
+}
+
+class _SinglePoemImportDialog extends StatefulWidget {
+  const _SinglePoemImportDialog();
+
+  @override
+  State<_SinglePoemImportDialog> createState() => _SinglePoemImportDialogState();
+}
+
+class _SinglePoemImportDialogState extends State<_SinglePoemImportDialog> {
+  final _textController = TextEditingController();
+  String? _errorText;
+  bool _pickingFile = false;
+
+  @override
+  void dispose() {
+    _textController.dispose();
+    super.dispose();
+  }
+
+  void _submit() {
+    try {
+      final poem = parseSinglePoemImport(_textController.text);
+      Navigator.pop(context, poem);
+    } on FormatException catch (error) {
+      setState(() {
+        _errorText = error.message;
+      });
+    } catch (error) {
+      setState(() {
+        _errorText = error.toString();
+      });
+    }
+  }
+
+  Future<void> _pickFile() async {
+    setState(() {
+      _pickingFile = true;
+      _errorText = null;
+    });
+    try {
+      final text = await pickPoemImportFileText();
+      if (!mounted) {
+        return;
+      }
+      if (text != null) {
+        setState(() {
+          _textController.text = text;
+        });
+      }
+    } on FormatException catch (error) {
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _errorText = error.message;
+      });
+    } catch (error) {
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _errorText = error.toString();
+      });
+    } finally {
+      if (mounted) {
+        setState(() {
+          _pickingFile = false;
+        });
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: const Text('导入诗词'),
+      content: SizedBox(
+        width: double.maxFinite,
+        child: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Align(
+                alignment: Alignment.centerLeft,
+                child: OutlinedButton.icon(
+                  onPressed: _pickingFile ? null : _pickFile,
+                  icon: _pickingFile
+                      ? const SizedBox.square(
+                          dimension: 16,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        )
+                      : const Icon(Icons.folder_open_outlined),
+                  label: Text(_pickingFile ? '读取中' : '选择 JSON / JSONL 文件'),
+                ),
+              ),
+              const SizedBox(height: 12),
+              TextField(
+                controller: _textController,
+                decoration: InputDecoration(
+                  labelText: 'JSON / JSONL',
+                  hintText: '{"title":"静夜思","author":"李白","content":"..."}',
+                  alignLabelWithHint: true,
+                  errorText: _errorText,
+                ),
+                minLines: 8,
+                maxLines: 14,
+                keyboardType: TextInputType.multiline,
+              ),
+            ],
+          ),
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context),
+          child: const Text('取消'),
+        ),
+        FilledButton.icon(
+          onPressed: _submit,
+          icon: const Icon(Icons.upload_file_outlined),
+          label: const Text('导入'),
+        ),
+      ],
+    );
   }
 }
