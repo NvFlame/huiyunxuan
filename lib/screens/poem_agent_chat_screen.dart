@@ -6,6 +6,7 @@ import '../models/poem.dart';
 import '../models/poem_collection.dart';
 import '../services/openai_api_service.dart';
 import '../services/poem_agent_service.dart';
+import '../services/poem_text_format_service.dart';
 import '../services/web_search_service.dart';
 
 class PoemAgentChatScreen extends StatefulWidget {
@@ -370,7 +371,10 @@ class _PoemAgentChatScreenState extends State<PoemAgentChatScreen> {
       _addAssistantMessage('我还没有拿到足够完整的诗词信息。请补充作者、标题或首句。');
       return;
     }
-    final punctuationError = _validateContentPunctuation(draft.content);
+    final punctuationError = _validateContentPunctuation(
+      draft.content,
+      title: draft.title,
+    );
     if (punctuationError != null) {
       _addAssistantMessage('模型返回的《${draft.title}》正文标点不符合规范，所以我没有写入。\n\n$punctuationError');
       return;
@@ -381,6 +385,14 @@ class _PoemAgentChatScreenState extends State<PoemAgentChatScreen> {
     );
     if (annotationCheck.blockingError != null) {
       _addAssistantMessage('模型返回的《${draft.title}》注释无法处理，所以我没有写入。\n\n${annotationCheck.blockingError}');
+      return;
+    }
+    if (annotationCheck.skippedLines.isNotEmpty) {
+      _addAssistantMessage(
+        '模型返回的《${draft.title}》注释行号不符合规范，所以我没有写入。\n\n'
+        '${annotationCheck.skippedLines.first}\n\n'
+        '请让我重新整理这首诗的正文分行和注释行号。',
+      );
       return;
     }
 
@@ -441,7 +453,10 @@ class _PoemAgentChatScreenState extends State<PoemAgentChatScreen> {
     }
     final punctuationErrors = <String>[];
     for (final draft in drafts) {
-      final punctuationError = _validateContentPunctuation(draft.content);
+      final punctuationError = _validateContentPunctuation(
+        draft.content,
+        title: draft.title,
+      );
       if (punctuationError != null) {
         punctuationErrors.add('《${draft.title}》：$punctuationError');
       }
@@ -466,6 +481,14 @@ class _PoemAgentChatScreenState extends State<PoemAgentChatScreen> {
       final annotationError = annotationCheck.blockingError;
       if (annotationError != null) {
         _addAssistantMessage('模型返回的《${draft.title}》注释无法处理，所以我没有执行批量入库。\n\n$annotationError');
+        return;
+      }
+      if (annotationCheck.skippedLines.isNotEmpty) {
+        _addAssistantMessage(
+          '模型返回的《${draft.title}》注释行号不符合规范，所以我没有执行批量入库。\n\n'
+          '${annotationCheck.skippedLines.first}\n\n'
+          '请让我重新整理这些诗的正文分行和注释行号。',
+        );
         return;
       }
     }
@@ -542,7 +565,10 @@ class _PoemAgentChatScreenState extends State<PoemAgentChatScreen> {
       return;
     }
     if (updates.values.containsKey('content')) {
-      final punctuationError = _validateContentPunctuation(updatedPoem.content);
+      final punctuationError = _validateContentPunctuation(
+        updatedPoem.content,
+        title: updatedPoem.title,
+      );
       if (punctuationError != null) {
         _addAssistantMessage('模型返回的正文标点不符合规范，所以我没有写入。\n\n$punctuationError');
         return;
@@ -573,26 +599,8 @@ class _PoemAgentChatScreenState extends State<PoemAgentChatScreen> {
     _addAssistantMessage(_messageWithSources(message, result.searchSources));
   }
 
-  String? _validateContentPunctuation(String content) {
-    final lines = content
-        .replaceAll('\r\n', '\n')
-        .replaceAll('\r', '\n')
-        .split('\n')
-        .map((line) => line.trim())
-        .where((line) => line.isNotEmpty)
-        .toList(growable: false);
-    if (lines.length < 2) {
-      return null;
-    }
-
-    final joined = lines.join('');
-    final hasChineseText = RegExp(r'[\u4e00-\u9fff]').hasMatch(joined);
-    final hasPunctuation = RegExp(r'[，。？！；：、,.?!;:]').hasMatch(joined);
-    if (!hasChineseText || hasPunctuation) {
-      return null;
-    }
-
-    return '正文有 ${lines.length} 个非空行，但没有逗号、句号等标点。请依据带标点的权威整理本重新生成，不要在换行时删除标点。';
+  String? _validateContentPunctuation(String content, {String title = ''}) {
+    return validatePoemContentLayout(content, title: title)?.message;
   }
 
   String _messageWithSources(String message, List<String> sources) {

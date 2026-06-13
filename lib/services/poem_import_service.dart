@@ -3,6 +3,8 @@ import 'dart:io';
 
 import 'package:file_picker/file_picker.dart';
 
+import 'poem_text_format_service.dart';
+
 const poemImportFileExtensions = ['json', 'jsonl', 'txt'];
 
 class ImportedPoemDraft {
@@ -115,6 +117,9 @@ ImportedCollectionDraft parsePoemCollectionImport(
   if (invalidIndex >= 0) {
     throw FormatException('第 ${invalidIndex + 1} 首诗缺少标题或内容');
   }
+  for (var index = 0; index < poems.length; index += 1) {
+    _validateImportedPoem(poems[index], label: '第 ${index + 1} 首诗');
+  }
   if (poems.isEmpty) {
     throw const FormatException('没有可导入的诗词');
   }
@@ -147,6 +152,7 @@ ImportedPoemDraft parseSinglePoemImport(String text) {
   if (!poem.isValid) {
     throw const FormatException('导入诗词缺少标题或内容');
   }
+  _validateImportedPoem(poem, label: '导入诗词');
   return poem;
 }
 
@@ -231,4 +237,17 @@ String _firstNonEmpty(List<String> values) {
 bool _looksLikePoemMap(Map<Object?, Object?> map) {
   return _readString(map, ['title', '标题']).isNotEmpty ||
       _readString(map, ['content', '内容', '正文']).isNotEmpty;
+}
+
+void _validateImportedPoem(ImportedPoemDraft poem, {required String label}) {
+  final issue = validatePoemTextFormat(
+    title: poem.title,
+    content: poem.content,
+    annotation: poem.annotation,
+  );
+  if (issue != null) {
+    final title = poem.title.trim();
+    final prefix = title.isEmpty ? label : '$label《$title》';
+    throw FormatException('$prefix：${issue.message}');
+  }
 }

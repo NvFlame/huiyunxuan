@@ -1189,7 +1189,7 @@ class _PoemContentView extends StatelessWidget {
           children: [
             for (final rawLine in lines)
               if (rawLine.trim().isEmpty)
-                const SizedBox(height: 14)
+                const _StanzaDivider()
               else
                 Builder(
                   builder: (context) {
@@ -1275,6 +1275,22 @@ class _PoemContentView extends StatelessWidget {
                 ),
           ],
         ),
+      ),
+    );
+  }
+}
+
+class _StanzaDivider extends StatelessWidget {
+  const _StanzaDivider();
+
+  @override
+  Widget build(BuildContext context) {
+    return const Padding(
+      padding: EdgeInsets.fromLTRB(28, 10, 4, 10),
+      child: Divider(
+        height: 1,
+        thickness: 0.8,
+        color: Color(0xFFEEDC9A),
       ),
     );
   }

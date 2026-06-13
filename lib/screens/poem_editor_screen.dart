@@ -214,7 +214,7 @@ class _PoemEditorScreenState extends State<PoemEditorScreen> {
                 controller: _contentController,
                 decoration: const InputDecoration(
                   labelText: '内容',
-                  hintText: '按诗句或词句换行，一句一行',
+                  hintText: '一句一行，上下阙或自然段用空行分隔',
                   alignLabelWithHint: true,
                 ),
                 minLines: 8,

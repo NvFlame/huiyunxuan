@@ -561,15 +561,6 @@ class _PoemCard extends StatelessWidget {
                         style: theme.textTheme.bodySmall,
                       ),
                     ],
-                    if (poem.learningNote.isNotEmpty) ...[
-                      const SizedBox(height: 8),
-                      Text(
-                        '笔记：${poem.learningNote}',
-                        maxLines: 2,
-                        overflow: TextOverflow.ellipsis,
-                        style: theme.textTheme.bodySmall,
-                      ),
-                    ],
                     const SizedBox(height: 8),
                     Text(
                       contentPreview,
