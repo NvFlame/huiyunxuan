@@ -4,6 +4,10 @@ import 'package:flutter/rendering.dart';
 import '../data/app_database.dart';
 import '../models/poem.dart';
 import '../models/poem_collection.dart';
+import '../services/prosody_ai_service.dart';
+import '../widgets/prosody_calibration_dialog.dart';
+import '../widgets/prosody_panel.dart';
+import '../widgets/tone_marked_text.dart';
 import 'poem_agent_chat_screen.dart';
 
 class LearningModeScreen extends StatefulWidget {
@@ -32,6 +36,8 @@ class _LearningModeScreenState extends State<LearningModeScreen> {
   int? _previewLineNumber;
   List<String> _previewAnnotationNotes = const <String>[];
   int _previewToken = 0;
+  bool _showToneMarks = false;
+  bool _prosodyCalibrating = false;
   bool _loading = true;
   String? _error;
 
@@ -347,6 +353,63 @@ class _LearningModeScreenState extends State<LearningModeScreen> {
       poem.copyWith(learningNote: nextNote),
     );
     await _reloadCurrentCollection(preferredPoemId: poem.id);
+  }
+
+  Future<void> _openProsodyCalibrationDialog(Poem poem) async {
+    final nextOverridesJson = await showDialog<String>(
+      context: context,
+      builder: (context) => ProsodyCalibrationDialog(poem: poem),
+    );
+    if (nextOverridesJson == null || !mounted) {
+      return;
+    }
+    await AppDatabase.instance.updatePoem(
+      poem.copyWith(
+        prosodyOverridesJson: nextOverridesJson,
+        prosodyVerifiedAt: DateTime.now(),
+        prosodyVerifiedBy: 'user',
+      ),
+    );
+    await _reloadCurrentCollection(preferredPoemId: poem.id);
+    _showSnackBar('已保存人工校准');
+  }
+
+  Future<void> _runProsodyAiCalibration(Poem poem) async {
+    if (_prosodyCalibrating) {
+      return;
+    }
+    final config = await AppDatabase.instance.getActiveApiConfig();
+    if (config == null) {
+      _showSnackBar('请先在 API 管理中选择可用配置');
+      return;
+    }
+
+    setState(() {
+      _prosodyCalibrating = true;
+    });
+    try {
+      final overridesJson = await const ProsodyAiService().calibrate(
+        config: config,
+        poem: poem,
+      );
+      await AppDatabase.instance.updatePoem(
+        poem.copyWith(
+          prosodyOverridesJson: overridesJson,
+          prosodyVerifiedAt: DateTime.now(),
+          prosodyVerifiedBy: 'agent',
+        ),
+      );
+      await _reloadCurrentCollection(preferredPoemId: poem.id);
+      _showSnackBar('智能校准已写回诗词库');
+    } catch (error) {
+      _showSnackBar('智能校准失败：$error');
+    } finally {
+      if (mounted) {
+        setState(() {
+          _prosodyCalibrating = false;
+        });
+      }
+    }
   }
 
   Future<void> _showJumpDialog() async {
@@ -724,7 +787,10 @@ class _LearningModeScreenState extends State<LearningModeScreen> {
               _PoemLearningHeader(poem: poem),
               const SizedBox(height: 12),
               _PoemContentView(
-                content: poem.content,
+                poem: poem,
+                showToneMarks: _showToneMarks &&
+                    poem.prosodySupported &&
+                    poem.prosodyEnabled,
                 previewLineNumber: _previewLineNumber,
                 previewNotes: _previewAnnotationNotes,
                 onLineNumberTap: (lineNumber) {
@@ -736,6 +802,20 @@ class _LearningModeScreenState extends State<LearningModeScreen> {
                 onDismissPreview: _hideLineAnnotationPreview,
               ),
               const SizedBox(height: 12),
+              ProsodyPanel(
+                poem: poem,
+                showToneDetails: _showToneMarks,
+                calibrationBusy: _prosodyCalibrating,
+                onToneDetailsChanged: (value) {
+                  setState(() {
+                    _showToneMarks = value;
+                  });
+                },
+                onManualCalibration: () => _openProsodyCalibrationDialog(poem),
+                onAiCalibration: () => _runProsodyAiCalibration(poem),
+              ),
+              if (poem.prosodySupported && poem.prosodyEnabled)
+                const SizedBox(height: 12),
               _ControlledLearningSection(
                 sectionKey: _annotationSectionKey,
                 title: '注释',
@@ -1152,7 +1232,8 @@ class _InfoChip extends StatelessWidget {
 
 class _PoemContentView extends StatelessWidget {
   const _PoemContentView({
-    required this.content,
+    required this.poem,
+    required this.showToneMarks,
     required this.previewLineNumber,
     required this.previewNotes,
     required this.onLineNumberTap,
@@ -1160,7 +1241,8 @@ class _PoemContentView extends StatelessWidget {
     required this.onDismissPreview,
   });
 
-  final String content;
+  final Poem poem;
+  final bool showToneMarks;
   final int? previewLineNumber;
   final List<String> previewNotes;
   final ValueChanged<int> onLineNumberTap;
@@ -1170,7 +1252,7 @@ class _PoemContentView extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final lines = content
+    final lines = poem.content
         .replaceAll('\r\n', '\n')
         .replaceAll('\r', '\n')
         .split('\n');
@@ -1254,14 +1336,31 @@ class _PoemContentView extends StatelessWidget {
                                       ),
                                     ),
                                     Expanded(
-                                      child: Text(
-                                        rawLine.trim(),
-                                        style: theme.textTheme.titleMedium
-                                            ?.copyWith(
-                                          height: 1.7,
-                                          color: const Color(0xFF2F2510),
-                                        ),
-                                      ),
+                                      child: showToneMarks
+                                          ? ToneMarkedLineText(
+                                              line: rawLine.trim(),
+                                              rhymeBook:
+                                                  poem.prosodyRhymeBook,
+                                              lineNumber: currentLineNumber,
+                                              overridesJson:
+                                                  poem.prosodyOverridesJson,
+                                              textStyle: theme
+                                                  .textTheme.titleMedium
+                                                  ?.copyWith(
+                                                height: 1.25,
+                                                color:
+                                                    const Color(0xFF2F2510),
+                                              ),
+                                            )
+                                          : Text(
+                                              rawLine.trim(),
+                                              style: theme.textTheme.titleMedium
+                                                  ?.copyWith(
+                                                height: 1.7,
+                                                color:
+                                                    const Color(0xFF2F2510),
+                                              ),
+                                            ),
                                     ),
                                   ],
                                 ),
@@ -1376,6 +1475,8 @@ class _LearningSection extends StatelessWidget {
       margin: const EdgeInsets.symmetric(vertical: 6),
       child: ExpansionTile(
         initiallyExpanded: initiallyExpanded,
+        shape: const RoundedRectangleBorder(side: BorderSide.none),
+        collapsedShape: const RoundedRectangleBorder(side: BorderSide.none),
         leading: Icon(icon),
         title: Text(title),
         childrenPadding: const EdgeInsets.fromLTRB(16, 0, 16, 14),
@@ -1443,6 +1544,8 @@ class _LearningNoteSection extends StatelessWidget {
       margin: const EdgeInsets.symmetric(vertical: 6),
       child: ExpansionTile(
         initiallyExpanded: value.isNotEmpty,
+        shape: const RoundedRectangleBorder(side: BorderSide.none),
+        collapsedShape: const RoundedRectangleBorder(side: BorderSide.none),
         leading: const Icon(Icons.edit_note_outlined),
         title: const Text('学习笔记'),
         childrenPadding: const EdgeInsets.fromLTRB(16, 0, 16, 14),
@@ -1618,7 +1721,7 @@ class _AnnotationView extends StatelessWidget {
     final theme = Theme.of(context);
     if (annotation.isEmpty) {
       return Text(
-        '暂无注释。可以让智能体按 [行号] 规范补充。',
+        '暂无注释。可以让智能体按 [0] 标题注释、[行号] 正文注释的规范补充。',
         style: theme.textTheme.bodyMedium,
       );
     }
@@ -1647,7 +1750,7 @@ class _AnnotationView extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  '第 $key 行',
+                  key == 0 ? '标题' : '第 $key 行',
                   style: theme.textTheme.labelLarge?.copyWith(
                     color: const Color(0xFF9A7B2F),
                   ),

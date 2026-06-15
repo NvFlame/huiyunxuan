@@ -19,6 +19,15 @@ class ImportedPoemDraft {
     required this.annotation,
     required this.learningNote,
     required this.appreciation,
+    this.prosodySupported,
+    this.prosodyEnabled,
+    this.prosodySystem = '',
+    this.prosodyForm = '',
+    this.prosodyRhymeBook = '',
+    this.prosodyNote = '',
+    this.prosodyOverridesJson = '',
+    this.prosodyVerifiedAt,
+    this.prosodyVerifiedBy = '',
   });
 
   final String title;
@@ -31,8 +40,28 @@ class ImportedPoemDraft {
   final String annotation;
   final String learningNote;
   final String appreciation;
+  final bool? prosodySupported;
+  final bool? prosodyEnabled;
+  final String prosodySystem;
+  final String prosodyForm;
+  final String prosodyRhymeBook;
+  final String prosodyNote;
+  final String prosodyOverridesJson;
+  final DateTime? prosodyVerifiedAt;
+  final String prosodyVerifiedBy;
 
   bool get isValid => title.trim().isNotEmpty && content.trim().isNotEmpty;
+  bool get hasProsodyMetadata {
+    return prosodySupported != null ||
+        prosodyEnabled != null ||
+        prosodySystem.trim().isNotEmpty ||
+        prosodyForm.trim().isNotEmpty ||
+        prosodyRhymeBook.trim().isNotEmpty ||
+        prosodyNote.trim().isNotEmpty ||
+        prosodyOverridesJson.trim().isNotEmpty ||
+        prosodyVerifiedAt != null ||
+        prosodyVerifiedBy.trim().isNotEmpty;
+  }
 
   factory ImportedPoemDraft.fromJson(Object? value) {
     if (value is! Map) {
@@ -40,6 +69,10 @@ class ImportedPoemDraft {
     }
 
     final map = value.cast<Object?, Object?>();
+    final prosodyValue = _readValue(map, ['prosody', '格律']);
+    final prosodyMap = prosodyValue is Map
+        ? prosodyValue.cast<Object?, Object?>()
+        : map;
     return ImportedPoemDraft(
       title: _readString(map, ['title', '标题']),
       author: _readString(map, ['author', '作者']),
@@ -54,6 +87,39 @@ class ImportedPoemDraft {
         ['learning_note', 'learningNote', '学习笔记'],
       ),
       appreciation: _readString(map, ['appreciation', '赏析']),
+      prosodySupported: _readBool(
+        prosodyMap,
+        ['supported', 'prosody_supported', 'supports_prosody', '支持格律'],
+      ),
+      prosodyEnabled: _readBool(
+        prosodyMap,
+        ['enabled', 'prosody_enabled', 'show_prosody', '显示格律'],
+      ),
+      prosodySystem: _readString(
+        prosodyMap,
+        ['system', 'prosody_system', '格律系统'],
+      ),
+      prosodyForm: _readString(
+        prosodyMap,
+        ['form', 'prosody_form', '体式', '词牌', '曲牌'],
+      ),
+      prosodyRhymeBook: _readString(
+        prosodyMap,
+        ['rhyme_book', 'prosody_rhyme_book', '韵书'],
+      ),
+      prosodyNote: _readString(
+        prosodyMap,
+        ['note', 'prosody_note', '格律说明'],
+      ),
+      prosodyOverridesJson: _readProsodyOverrides(prosodyMap),
+      prosodyVerifiedAt: _readDateTime(
+        prosodyMap,
+        ['verified_at', 'prosody_verified_at', '校准时间'],
+      ),
+      prosodyVerifiedBy: _readString(
+        prosodyMap,
+        ['verified_by', 'prosody_verified_by', '校准来源'],
+      ),
     );
   }
 }
@@ -223,6 +289,77 @@ String _readString(Map<Object?, Object?> map, List<String> keys) {
     return value.map((item) => item.toString().trim()).join('\n').trim();
   }
   return value.toString().trim();
+}
+
+bool? _readBool(Map<Object?, Object?> map, List<String> keys) {
+  final value = _readValue(map, keys);
+  if (value == null) {
+    return null;
+  }
+  if (value is bool) {
+    return value;
+  }
+  if (value is num) {
+    return value != 0;
+  }
+  final text = value.toString().trim().toLowerCase();
+  if (text.isEmpty) {
+    return null;
+  }
+  if (text == '1' ||
+      text == 'true' ||
+      text == 'yes' ||
+      text == 'y' ||
+      text == '是' ||
+      text == '支持' ||
+      text == '开启') {
+    return true;
+  }
+  if (text == '0' ||
+      text == 'false' ||
+      text == 'no' ||
+      text == 'n' ||
+      text == '否' ||
+      text == '不支持' ||
+      text == '关闭') {
+    return false;
+  }
+  return null;
+}
+
+DateTime? _readDateTime(Map<Object?, Object?> map, List<String> keys) {
+  final value = _readValue(map, keys);
+  if (value == null) {
+    return null;
+  }
+  if (value is num && value > 0) {
+    return DateTime.fromMillisecondsSinceEpoch(value.toInt());
+  }
+  final text = value.toString().trim();
+  if (text.isEmpty) {
+    return null;
+  }
+  return DateTime.tryParse(text);
+}
+
+String _readProsodyOverrides(Map<Object?, Object?> map) {
+  final value = _readValue(
+    map,
+    [
+      'overrides',
+      'overrides_json',
+      'prosody_overrides',
+      'prosody_overrides_json',
+      '校准数据',
+    ],
+  );
+  if (value == null) {
+    return '';
+  }
+  if (value is String) {
+    return value.trim();
+  }
+  return jsonEncode(value);
 }
 
 String _firstNonEmpty(List<String> values) {

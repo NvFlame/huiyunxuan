@@ -6,6 +6,7 @@ import 'package:sqflite/sqflite.dart';
 import '../models/api_config.dart';
 import '../models/poem.dart';
 import '../models/poem_collection.dart';
+import '../services/prosody_service.dart';
 
 class AppDatabase {
   AppDatabase._();
@@ -31,7 +32,7 @@ class AppDatabase {
 
     return openDatabase(
       path,
-      version: 12,
+      version: 15,
       onConfigure: (db) async {
         await db.execute('PRAGMA foreign_keys = ON');
       },
@@ -135,6 +136,21 @@ AND search_api_key != ''
         if (oldVersion < 12) {
           await _createTrainingTables(db);
         }
+        if (oldVersion >= 3 && oldVersion < 13) {
+          await _addProsodyColumns(db);
+        }
+        if (oldVersion >= 3 && oldVersion < 15) {
+          await _addProsodyFoundationColumns(db);
+        }
+        if (oldVersion < 13) {
+          await _backfillProsodyMetadata(db);
+        }
+        if (oldVersion < 14) {
+          await _normalizeProsodyMetadata(db);
+        }
+        if (oldVersion < 15) {
+          await _backfillProsodyMetadata(db);
+        }
       },
     );
   }
@@ -199,6 +215,15 @@ CREATE TABLE poem_elements (
   annotation TEXT NOT NULL DEFAULT '',
   learning_note TEXT NOT NULL DEFAULT '',
   appreciation TEXT NOT NULL DEFAULT '',
+  prosody_enabled INTEGER NOT NULL DEFAULT 0,
+  prosody_supported INTEGER NOT NULL DEFAULT 0,
+  prosody_system TEXT NOT NULL DEFAULT '${Poem.prosodySystemUnknown}',
+  prosody_form TEXT NOT NULL DEFAULT '',
+  prosody_rhyme_book TEXT NOT NULL DEFAULT '',
+  prosody_note TEXT NOT NULL DEFAULT '',
+  prosody_overrides_json TEXT NOT NULL DEFAULT '',
+  prosody_verified_at INTEGER,
+  prosody_verified_by TEXT NOT NULL DEFAULT '',
   created_at INTEGER NOT NULL,
   updated_at INTEGER NOT NULL
 )
@@ -254,6 +279,108 @@ CREATE TABLE IF NOT EXISTS learning_progress (
       'CREATE INDEX IF NOT EXISTS idx_learning_progress_updated_at '
       'ON learning_progress(updated_at)',
     );
+  }
+
+  Future<void> _addProsodyColumns(DatabaseExecutor db) async {
+    await db.execute(
+      'ALTER TABLE poem_elements ADD COLUMN prosody_enabled INTEGER NOT NULL DEFAULT 0',
+    );
+    await db.execute(
+      "ALTER TABLE poem_elements ADD COLUMN prosody_system TEXT NOT NULL DEFAULT '${Poem.prosodySystemUnknown}'",
+    );
+    await db.execute(
+      "ALTER TABLE poem_elements ADD COLUMN prosody_form TEXT NOT NULL DEFAULT ''",
+    );
+    await db.execute(
+      "ALTER TABLE poem_elements ADD COLUMN prosody_rhyme_book TEXT NOT NULL DEFAULT ''",
+    );
+    await db.execute(
+      "ALTER TABLE poem_elements ADD COLUMN prosody_note TEXT NOT NULL DEFAULT ''",
+    );
+  }
+
+  Future<void> _addProsodyFoundationColumns(DatabaseExecutor db) async {
+    await db.execute(
+      'ALTER TABLE poem_elements ADD COLUMN prosody_supported INTEGER NOT NULL DEFAULT 0',
+    );
+    await db.execute(
+      "ALTER TABLE poem_elements ADD COLUMN prosody_overrides_json TEXT NOT NULL DEFAULT ''",
+    );
+    await db.execute(
+      'ALTER TABLE poem_elements ADD COLUMN prosody_verified_at INTEGER',
+    );
+    await db.execute(
+      "ALTER TABLE poem_elements ADD COLUMN prosody_verified_by TEXT NOT NULL DEFAULT ''",
+    );
+  }
+
+  Future<void> _backfillProsodyMetadata(Database db) async {
+    final rows = await db.query(
+      'poem_elements',
+      columns: ['id', 'title', 'dynasty', 'content', 'remark'],
+    );
+    for (final row in rows) {
+      final id = row['id'];
+      if (id is! int) {
+        continue;
+      }
+      final metadata = inferProsodyMetadata(
+        title: (row['title'] as String?) ?? '',
+        dynasty: (row['dynasty'] as String?) ?? '',
+        content: (row['content'] as String?) ?? '',
+        remark: (row['remark'] as String?) ?? '',
+      );
+      await db.update(
+        'poem_elements',
+        {
+          'prosody_enabled': metadata.enabled ? 1 : 0,
+          'prosody_supported': metadata.supported ? 1 : 0,
+          'prosody_system': metadata.system,
+          'prosody_form': metadata.form,
+          'prosody_rhyme_book': metadata.rhymeBook,
+          'prosody_note': metadata.note,
+        },
+        where: 'id = ?',
+        whereArgs: [id],
+      );
+    }
+  }
+
+  Future<void> _normalizeProsodyMetadata(Database db) async {
+    await db.rawUpdate(
+      "UPDATE poem_elements SET prosody_form = REPLACE(prosody_form, '候选', '') "
+      "WHERE prosody_form LIKE '%候选%'",
+    );
+    await db.rawUpdate(
+      "UPDATE poem_elements SET prosody_note = REPLACE(prosody_note, '候选', '') "
+      "WHERE prosody_note LIKE '%候选%'",
+    );
+    final rows = await db.query(
+      'poem_elements',
+      columns: ['id', 'dynasty', 'prosody_system', 'prosody_rhyme_book'],
+      where: 'prosody_system = ?',
+      whereArgs: [Poem.prosodySystemRegulatedVerse],
+    );
+    for (final row in rows) {
+      final id = row['id'];
+      if (id is! int) {
+        continue;
+      }
+      final dynasty = ((row['dynasty'] as String?) ?? '').trim();
+      final rhymeBook = ((row['prosody_rhyme_book'] as String?) ?? '').trim();
+      final isModern = dynasty.contains('当代') ||
+          dynasty.contains('现代') ||
+          dynasty.contains('近现代') ||
+          dynasty.contains('现当代');
+      if (isModern && rhymeBook != Poem.rhymeBookXinYun) {
+        await db.update(
+          'poem_elements',
+          {'prosody_rhyme_book': Poem.rhymeBookXinYun},
+          where: 'id = ?',
+          whereArgs: [id],
+        );
+      }
+    }
   }
 
   Future<void> _createTrainingTables(DatabaseExecutor db) async {
@@ -905,9 +1032,41 @@ ORDER BY cp.created_at ASC, pe.title ASC
     String annotation = '',
     String learningNote = '',
     String appreciation = '',
+    bool? prosodySupported,
+    bool? prosodyEnabled,
+    String? prosodySystem,
+    String? prosodyForm,
+    String? prosodyRhymeBook,
+    String? prosodyNote,
+    String prosodyOverridesJson = '',
+    DateTime? prosodyVerifiedAt,
+    String prosodyVerifiedBy = '',
   }) async {
     final now = DateTime.now();
     final createdAt = now.millisecondsSinceEpoch;
+    final inferredProsody = inferProsodyMetadata(
+      title: title,
+      dynasty: dynasty,
+      content: content,
+      remark: remark,
+    );
+    final resolvedSystem =
+        (prosodySystem == null || prosodySystem.trim().isEmpty)
+            ? inferredProsody.system
+            : prosodySystem.trim();
+    final hasExplicitProsodyMetadata =
+        (prosodySystem?.trim().isNotEmpty ?? false) ||
+            (prosodyForm?.trim().isNotEmpty ?? false) ||
+            (prosodyRhymeBook?.trim().isNotEmpty ?? false) ||
+            prosodyOverridesJson.trim().isNotEmpty ||
+            prosodyVerifiedAt != null ||
+            prosodyVerifiedBy.trim().isNotEmpty;
+    final resolvedSupported = prosodySupported ??
+        (hasExplicitProsodyMetadata &&
+                resolvedSystem != Poem.prosodySystemUnknown &&
+                resolvedSystem != Poem.prosodySystemUnsupported
+            ? true
+            : inferredProsody.supported);
     final poem = Poem(
       collectionId: collectionId,
       identity: _generatePoemIdentity(),
@@ -921,6 +1080,24 @@ ORDER BY cp.created_at ASC, pe.title ASC
       annotation: annotation.trim(),
       learningNote: learningNote.trim(),
       appreciation: appreciation.trim(),
+      prosodySupported: resolvedSupported,
+      prosodyEnabled: resolvedSupported &&
+          (prosodyEnabled ??
+              (hasExplicitProsodyMetadata ? true : inferredProsody.enabled)),
+      prosodySystem: resolvedSystem,
+      prosodyForm: (prosodyForm == null || prosodyForm.trim().isEmpty)
+          ? inferredProsody.form
+          : prosodyForm.trim(),
+      prosodyRhymeBook:
+          (prosodyRhymeBook == null || prosodyRhymeBook.trim().isEmpty)
+              ? inferredProsody.rhymeBook
+              : prosodyRhymeBook.trim(),
+      prosodyNote: (prosodyNote == null || prosodyNote.trim().isEmpty)
+          ? inferredProsody.note
+          : prosodyNote.trim(),
+      prosodyOverridesJson: prosodyOverridesJson.trim(),
+      prosodyVerifiedAt: prosodyVerifiedAt,
+      prosodyVerifiedBy: prosodyVerifiedBy.trim(),
       createdAt: now,
       updatedAt: now,
     );

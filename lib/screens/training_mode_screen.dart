@@ -6,6 +6,8 @@ import 'package:flutter/material.dart';
 import '../data/app_database.dart';
 import '../models/poem.dart';
 import '../models/poem_collection.dart';
+import '../widgets/prosody_panel.dart';
+import '../widgets/tone_marked_text.dart';
 import 'poem_agent_chat_screen.dart';
 
 enum TrainingDifficulty { xiucai, juren, gongsheng, jinshi }
@@ -104,6 +106,7 @@ class _TrainingModeScreenState extends State<TrainingModeScreen> {
   bool _passed = false;
   bool _abandoned = false;
   bool _trainingSessionStarted = false;
+  bool _showToneMarks = false;
   int _attemptToken = 0;
 
   Poem? get _currentPoem {
@@ -957,14 +960,36 @@ class _TrainingModeScreenState extends State<TrainingModeScreen> {
               title: '正文',
               icon: Icons.subject_outlined,
               initiallyExpanded: true,
-              child: SelectableText(
-                poem.content,
-                style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                      height: 1.75,
-                      color: const Color(0xFF2F2510),
+              child: _showToneMarks &&
+                      poem.prosodySupported &&
+                      poem.prosodyEnabled
+                  ? ToneMarkedPoemText(
+                      poem: poem,
+                      textStyle: Theme.of(context).textTheme.titleMedium
+                          ?.copyWith(
+                            height: 1.25,
+                            color: const Color(0xFF2F2510),
+                          ),
+                    )
+                  : SelectableText(
+                      poem.content,
+                      style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                            height: 1.75,
+                            color: const Color(0xFF2F2510),
+                          ),
                     ),
-              ),
             ),
+            ProsodyPanel(
+              poem: poem,
+              showToneDetails: _showToneMarks,
+              onToneDetailsChanged: (value) {
+                setState(() {
+                  _showToneMarks = value;
+                });
+              },
+            ),
+            if (poem.prosodySupported && poem.prosodyEnabled)
+              const SizedBox(height: 8),
             _TrainingContentSection(
               title: '注释',
               icon: Icons.notes_outlined,
@@ -1695,6 +1720,8 @@ class _TrainingContentSection extends StatelessWidget {
       margin: const EdgeInsets.symmetric(vertical: 6),
       child: ExpansionTile(
         initiallyExpanded: initiallyExpanded,
+        shape: const RoundedRectangleBorder(side: BorderSide.none),
+        collapsedShape: const RoundedRectangleBorder(side: BorderSide.none),
         leading: Icon(icon),
         title: Text(title),
         childrenPadding: const EdgeInsets.fromLTRB(16, 0, 16, 14),

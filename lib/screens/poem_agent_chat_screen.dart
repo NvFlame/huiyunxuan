@@ -7,6 +7,7 @@ import '../models/poem_collection.dart';
 import '../services/openai_api_service.dart';
 import '../services/poem_agent_service.dart';
 import '../services/poem_text_format_service.dart';
+import '../services/prosody_service.dart';
 import '../services/web_search_service.dart';
 
 class PoemAgentChatScreen extends StatefulWidget {
@@ -361,7 +362,8 @@ class _PoemAgentChatScreenState extends State<PoemAgentChatScreen> {
 
   Future<void> _addPoemFromAgent(PoemAgentResult result) async {
     final collectionId = result.collectionId;
-    final draft = result.poem!;
+    var draft = result.poem!;
+    draft = _normalizeDraftContent(draft);
     if (collectionId == null ||
         !_collections.any((item) => item.id == collectionId)) {
       _addAssistantMessage('我还不能确定要添加到哪个诗词库。请说明目标诗词库名称。');
@@ -376,7 +378,9 @@ class _PoemAgentChatScreenState extends State<PoemAgentChatScreen> {
       title: draft.title,
     );
     if (punctuationError != null) {
-      _addAssistantMessage('模型返回的《${draft.title}》正文标点不符合规范，所以我没有写入。\n\n$punctuationError');
+      _addAssistantMessage(
+        '我未能搜索到《${draft.title}》带完整标点和可靠分行的全文，所以没有写入。\n\n$punctuationError',
+      );
       return;
     }
     final annotationCheck = _normalizeAnnotation(
@@ -385,14 +389,6 @@ class _PoemAgentChatScreenState extends State<PoemAgentChatScreen> {
     );
     if (annotationCheck.blockingError != null) {
       _addAssistantMessage('模型返回的《${draft.title}》注释无法处理，所以我没有写入。\n\n${annotationCheck.blockingError}');
-      return;
-    }
-    if (annotationCheck.skippedLines.isNotEmpty) {
-      _addAssistantMessage(
-        '模型返回的《${draft.title}》注释行号不符合规范，所以我没有写入。\n\n'
-        '${annotationCheck.skippedLines.first}\n\n'
-        '请让我重新整理这首诗的正文分行和注释行号。',
-      );
       return;
     }
 
@@ -430,7 +426,9 @@ class _PoemAgentChatScreenState extends State<PoemAgentChatScreen> {
 
   Future<void> _addPoemsFromAgent(PoemAgentResult result) async {
     final collectionId = result.collectionId;
-    final drafts = result.poems;
+    final drafts = result.poems
+        .map(_normalizeDraftContent)
+        .toList(growable: false);
     if (collectionId == null ||
         !_collections.any((item) => item.id == collectionId)) {
       _addAssistantMessage('我还不能确定要添加到哪个诗词库。请说明目标诗词库名称。');
@@ -463,7 +461,7 @@ class _PoemAgentChatScreenState extends State<PoemAgentChatScreen> {
     }
     if (punctuationErrors.isNotEmpty) {
       _addAssistantMessage(
-        '以下诗词正文标点不符合规范，所以我没有执行批量入库：\n${punctuationErrors.join('\n')}',
+        '以下诗词未能搜索到带完整标点和可靠分行的全文，所以我没有执行批量入库：\n${punctuationErrors.join('\n')}',
       );
       return;
     }
@@ -481,14 +479,6 @@ class _PoemAgentChatScreenState extends State<PoemAgentChatScreen> {
       final annotationError = annotationCheck.blockingError;
       if (annotationError != null) {
         _addAssistantMessage('模型返回的《${draft.title}》注释无法处理，所以我没有执行批量入库。\n\n$annotationError');
-        return;
-      }
-      if (annotationCheck.skippedLines.isNotEmpty) {
-        _addAssistantMessage(
-          '模型返回的《${draft.title}》注释行号不符合规范，所以我没有执行批量入库。\n\n'
-          '${annotationCheck.skippedLines.first}\n\n'
-          '请让我重新整理这些诗的正文分行和注释行号。',
-        );
         return;
       }
     }
@@ -557,7 +547,44 @@ class _PoemAgentChatScreenState extends State<PoemAgentChatScreen> {
       return;
     }
 
-    final updatedPoem = updates.applyTo(existing);
+    var updatedPoem = updates.applyTo(existing);
+    if (updates.values.containsKey('content')) {
+      updatedPoem = updatedPoem.copyWith(
+        content: normalizePoemContentLayout(
+          updatedPoem.content,
+          title: updatedPoem.title,
+        ),
+      );
+    }
+    if (_shouldRefreshProsody(updates)) {
+      final inferredProsody = inferProsodyMetadata(
+        title: updatedPoem.title,
+        dynasty: updatedPoem.dynasty,
+        content: updatedPoem.content,
+        remark: updatedPoem.remark,
+      );
+      final useInferredEnabled =
+          existing.prosodySystem == Poem.prosodySystemUnknown;
+      updatedPoem = updatedPoem.copyWith(
+        prosodySupported: inferredProsody.supported,
+        prosodyEnabled: inferredProsody.supported &&
+            (useInferredEnabled ? inferredProsody.enabled : existing.prosodyEnabled),
+        prosodySystem: inferredProsody.system,
+        prosodyForm: inferredProsody.form,
+        prosodyRhymeBook: existing.prosodyRhymeBook.trim().isEmpty
+            ? inferredProsody.rhymeBook
+            : existing.prosodyRhymeBook,
+        prosodyNote: inferredProsody.note,
+        clearProsodyVerification: true,
+      );
+    }
+    if (updates.values.containsKey('prosody_overrides_json')) {
+      updatedPoem = updatedPoem.copyWith(
+        prosodyOverridesJson: updates.values['prosody_overrides_json'],
+        prosodyVerifiedAt: DateTime.now(),
+        prosodyVerifiedBy: 'agent',
+      );
+    }
     if (updatedPoem.title.trim().isEmpty ||
         updatedPoem.author.trim().isEmpty ||
         updatedPoem.content.trim().isEmpty) {
@@ -570,7 +597,7 @@ class _PoemAgentChatScreenState extends State<PoemAgentChatScreen> {
         title: updatedPoem.title,
       );
       if (punctuationError != null) {
-        _addAssistantMessage('模型返回的正文标点不符合规范，所以我没有写入。\n\n$punctuationError');
+        _addAssistantMessage('我未能确认带完整标点和可靠分行的正文，所以没有写入。\n\n$punctuationError');
         return;
       }
     }
@@ -599,8 +626,24 @@ class _PoemAgentChatScreenState extends State<PoemAgentChatScreen> {
     _addAssistantMessage(_messageWithSources(message, result.searchSources));
   }
 
+  PoemAgentDraft _normalizeDraftContent(PoemAgentDraft draft) {
+    return draft.copyWith(
+      content: normalizePoemContentLayout(
+        draft.content,
+        title: draft.title,
+      ),
+    );
+  }
+
   String? _validateContentPunctuation(String content, {String title = ''}) {
     return validatePoemContentLayout(content, title: title)?.message;
+  }
+
+  bool _shouldRefreshProsody(PoemAgentUpdates updates) {
+    return updates.values.containsKey('title') ||
+        updates.values.containsKey('dynasty') ||
+        updates.values.containsKey('content') ||
+        updates.values.containsKey('remark');
   }
 
   String _messageWithSources(String message, List<String> sources) {
@@ -670,10 +713,10 @@ class _PoemAgentChatScreenState extends State<PoemAgentChatScreen> {
 
       final lineNumber = int.tryParse(match.group(1)!);
       if (lineNumber == null ||
-          lineNumber < 1 ||
+          lineNumber < 0 ||
           lineNumber > contentLineCount) {
         skippedLines.add(
-          '注释第 ${index + 1} 行使用了 [$lineNumber]，但原文只有 $contentLineCount 个非空行。',
+          '注释第 ${index + 1} 行使用了 [$lineNumber]，但原文只有 $contentLineCount 个非空行；[0] 仅用于标题注释。',
         );
         continue;
       }

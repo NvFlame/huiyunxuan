@@ -96,6 +96,15 @@ class _CollectionListScreenState extends State<CollectionListScreen> {
         annotation: poem.annotation,
         learningNote: poem.learningNote,
         appreciation: poem.appreciation,
+        prosodySupported: poem.prosodySupported,
+        prosodyEnabled: poem.prosodyEnabled,
+        prosodySystem: poem.prosodySystem,
+        prosodyForm: poem.prosodyForm,
+        prosodyRhymeBook: poem.prosodyRhymeBook,
+        prosodyNote: poem.prosodyNote,
+        prosodyOverridesJson: poem.prosodyOverridesJson,
+        prosodyVerifiedAt: poem.prosodyVerifiedAt,
+        prosodyVerifiedBy: poem.prosodyVerifiedBy,
       );
     }
 

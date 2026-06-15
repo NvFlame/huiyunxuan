@@ -13,9 +13,28 @@ class Poem {
     this.annotation = '',
     this.learningNote = '',
     this.appreciation = '',
+    this.prosodySupported = false,
+    this.prosodyEnabled = false,
+    this.prosodySystem = prosodySystemUnknown,
+    this.prosodyForm = '',
+    this.prosodyRhymeBook = '',
+    this.prosodyNote = '',
+    this.prosodyOverridesJson = '',
+    this.prosodyVerifiedAt,
+    this.prosodyVerifiedBy = '',
     required this.createdAt,
     required this.updatedAt,
   });
+
+  static const prosodySystemUnknown = 'unknown';
+  static const prosodySystemRegulatedVerse = 'regulated_verse';
+  static const prosodySystemCi = 'ci';
+  static const prosodySystemQu = 'qu';
+  static const prosodySystemUnsupported = 'unsupported';
+
+  static const rhymeBookPingShui = '平水韵';
+  static const rhymeBookCiLin = '词林正韵';
+  static const rhymeBookXinYun = '新韵';
 
   final int? id;
   final String identity;
@@ -30,6 +49,15 @@ class Poem {
   final String annotation;
   final String learningNote;
   final String appreciation;
+  final bool prosodySupported;
+  final bool prosodyEnabled;
+  final String prosodySystem;
+  final String prosodyForm;
+  final String prosodyRhymeBook;
+  final String prosodyNote;
+  final String prosodyOverridesJson;
+  final DateTime? prosodyVerifiedAt;
+  final String prosodyVerifiedBy;
   final DateTime createdAt;
   final DateTime updatedAt;
 
@@ -47,6 +75,16 @@ class Poem {
     String? annotation,
     String? learningNote,
     String? appreciation,
+    bool? prosodySupported,
+    bool? prosodyEnabled,
+    String? prosodySystem,
+    String? prosodyForm,
+    String? prosodyRhymeBook,
+    String? prosodyNote,
+    String? prosodyOverridesJson,
+    DateTime? prosodyVerifiedAt,
+    String? prosodyVerifiedBy,
+    bool clearProsodyVerification = false,
     DateTime? createdAt,
     DateTime? updatedAt,
   }) {
@@ -64,6 +102,21 @@ class Poem {
       annotation: annotation ?? this.annotation,
       learningNote: learningNote ?? this.learningNote,
       appreciation: appreciation ?? this.appreciation,
+      prosodySupported: prosodySupported ?? this.prosodySupported,
+      prosodyEnabled: prosodyEnabled ?? this.prosodyEnabled,
+      prosodySystem: prosodySystem ?? this.prosodySystem,
+      prosodyForm: prosodyForm ?? this.prosodyForm,
+      prosodyRhymeBook: prosodyRhymeBook ?? this.prosodyRhymeBook,
+      prosodyNote: prosodyNote ?? this.prosodyNote,
+      prosodyOverridesJson: clearProsodyVerification
+          ? ''
+          : (prosodyOverridesJson ?? this.prosodyOverridesJson),
+      prosodyVerifiedAt: clearProsodyVerification
+          ? null
+          : (prosodyVerifiedAt ?? this.prosodyVerifiedAt),
+      prosodyVerifiedBy: clearProsodyVerification
+          ? ''
+          : (prosodyVerifiedBy ?? this.prosodyVerifiedBy),
       createdAt: createdAt ?? this.createdAt,
       updatedAt: updatedAt ?? this.updatedAt,
     );
@@ -83,6 +136,15 @@ class Poem {
       'annotation': annotation,
       'learning_note': learningNote,
       'appreciation': appreciation,
+      'prosody_supported': prosodySupported ? 1 : 0,
+      'prosody_enabled': prosodyEnabled ? 1 : 0,
+      'prosody_system': prosodySystem,
+      'prosody_form': prosodyForm,
+      'prosody_rhyme_book': prosodyRhymeBook,
+      'prosody_note': prosodyNote,
+      'prosody_overrides_json': prosodyOverridesJson,
+      'prosody_verified_at': prosodyVerifiedAt?.millisecondsSinceEpoch,
+      'prosody_verified_by': prosodyVerifiedBy,
       'created_at': createdAt.millisecondsSinceEpoch,
       'updated_at': updatedAt.millisecondsSinceEpoch,
     };
@@ -103,10 +165,39 @@ class Poem {
       annotation: (map['annotation'] as String?) ?? '',
       learningNote: (map['learning_note'] as String?) ?? '',
       appreciation: (map['appreciation'] as String?) ?? '',
+      prosodySupported: _boolFromMap(map['prosody_supported']),
+      prosodyEnabled: _boolFromMap(map['prosody_enabled']),
+      prosodySystem:
+          (map['prosody_system'] as String?) ?? prosodySystemUnknown,
+      prosodyForm: (map['prosody_form'] as String?) ?? '',
+      prosodyRhymeBook: (map['prosody_rhyme_book'] as String?) ?? '',
+      prosodyNote: (map['prosody_note'] as String?) ?? '',
+      prosodyOverridesJson: (map['prosody_overrides_json'] as String?) ?? '',
+      prosodyVerifiedAt: _nullableDateFromMap(map['prosody_verified_at']),
+      prosodyVerifiedBy: (map['prosody_verified_by'] as String?) ?? '',
       createdAt: _dateFromMap(map['created_at']),
       updatedAt: _dateFromMap(map['updated_at']),
     );
   }
+}
+
+DateTime? _nullableDateFromMap(Object? value) {
+  if (value == null) {
+    return null;
+  }
+  if (value is int) {
+    if (value <= 0) {
+      return null;
+    }
+    return DateTime.fromMillisecondsSinceEpoch(value);
+  }
+  if (value is String) {
+    if (value.trim().isEmpty) {
+      return null;
+    }
+    return DateTime.tryParse(value);
+  }
+  return null;
 }
 
 DateTime _dateFromMap(Object? value) {
@@ -117,4 +208,17 @@ DateTime _dateFromMap(Object? value) {
     return DateTime.tryParse(value) ?? DateTime.now();
   }
   return DateTime.now();
+}
+
+bool _boolFromMap(Object? value) {
+  if (value is int) {
+    return value != 0;
+  }
+  if (value is bool) {
+    return value;
+  }
+  if (value is String) {
+    return value == '1' || value.toLowerCase() == 'true';
+  }
+  return false;
 }

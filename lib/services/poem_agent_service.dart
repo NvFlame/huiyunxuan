@@ -4,6 +4,8 @@ import '../models/api_config.dart';
 import '../models/poem.dart';
 import '../models/poem_collection.dart';
 import 'openai_api_service.dart';
+import 'prosody_service.dart';
+import 'rhyme_service.dart';
 import 'web_search_service.dart';
 
 class PoemAgentService {
@@ -198,11 +200,12 @@ translation:
 只是那声音嘈杂刺耳，实在难以入耳。
 
 annotation:
+[0] 标题或词牌需要解释时使用标题注释。
 [1] 岂无：难道没有。
 [1] 山歌与村笛：山野歌声和乡村笛声。
 [2] 呕哑嘲哳：形容声音杂乱刺耳。
 
-反例：如果 content 只有 4 个非空原文行，annotation 里绝不能出现 [5]、[6]、[7] 这类行号；也不能写成普通编号或省略行号。
+反例：如果 content 只有 4 个非空原文行，annotation 里绝不能出现 [5]、[6]、[7] 这类行号；也不能写成普通编号或省略行号。[0] 只能用于标题注释，不能用于正文注释。
 
 你必须严格只返回一个 JSON 对象，不要使用 Markdown，不要输出 JSON 之外的任何文字。
 
@@ -221,6 +224,8 @@ JSON 格式只能是以下七类之一：
 
 5. 可以更新已有诗词元素：
 {"type":"update_poem","message":"简短说明","poem_id":12,"updates":{"translation":"新的译文","annotation":"新的注释","learning_note":"新的学习笔记","appreciation":"新的赏析内容"}}
+如果用户明确要求确认多音字平仄或韵脚韵部，可返回：
+{"type":"update_poem","message":"简短说明","poem_id":12,"updates":{"prosody_overrides_json":{"items":[{"line":4,"char_index":5,"char":"上","tone":"仄","rhyme":"去声二十三漾","note":"方位词，表示在青苔上面"}]}}}
 
 6. 确认不存在或无法查到：
 {"type":"not_found","message":"说明为什么不执行操作"}
@@ -241,14 +246,18 @@ JSON 格式只能是以下七类之一：
 - 用户要求添加诗词时，如果诗词不唯一，例如“无题”这类同名诗，必须先追问作者、首句或其它可唯一识别的信息。
 - 用户要求一次添加多首诗词，且所有诗词都能唯一确认时，返回 add_poems；如果其中任何一首不唯一或无法确认，必须先 ask，不能部分入库。
 - 用户要求修改、丰富、纠错、补充译文、补充注释、补充学习笔记或补充赏析时，必须先从“当前可编辑诗词清单”中确定唯一 poem_id；如果候选不唯一，必须追问并列出可区分的信息。
-- update_poem 的 updates 只能包含 title、author、dynasty、preface、content、remark、translation、annotation、learning_note、appreciation 这些字段，且只包含真正需要修改的字段。
+- update_poem 的 updates 只能包含 title、author、dynasty、preface、content、remark、translation、annotation、learning_note、appreciation、prosody_overrides_json、prosody_note 这些字段，且只包含真正需要修改的字段。
 - update_poem 的字段值必须是该字段“更新后的完整内容”，不是局部补丁；例如只修改 annotation 中某个词条时，也必须在 annotation 中返回保留其它原有注释后的完整注释文本。
+- prosody_overrides_json 只用于用户明确要求确认或更正多音字平仄、韵脚韵部时；格式必须是 JSON 对象或 JSON 字符串，包含 items 数组，每项含 line、char_index、char、tone、rhyme、note。tone 只能为“平”“仄”“多”；不能为了押韵强行改变字义读音。如果同诗韵脚分属多个韵部，应分别填写各自韵部。
 - 如果当前聚焦诗词完整内容中已经提供 annotation、translation、learning_note 或 appreciation，不得声称不知道现有注释、译文、学习笔记或赏析；只有该字段确实为空时，才可说明暂无现有内容。
 - 不允许只凭标题直接更新；同名诗、同作者同题诗或信息不足时必须 ask。
 - 如果用户要求纠错，而你不能可靠确认正确内容，必须 ask 或 not_found，不能编造。
 - “补充译文”“丰富赏析”“完善注释”可以基于已有原文与可靠文学常识生成；涉及原文、作者、朝代等事实性改动时必须更谨慎。
 - 只有 App 提供“联网搜索结果”时，才可声称已经联网核验；如果没有搜索结果且无法可靠确认，必须返回 search、ask 或 not_found，不能编造。
 - 只有在目标库和诗词都唯一、且你能给出可靠全文时，才能返回 add_poem。
+- 用户要求添加诗词时，不能把“格式不合规”“注释行号不合规”“正文分行不合规”作为最终失败理由；这些属于你必须在返回 JSON 前自行修正的内部格式问题。
+- 添加诗词的最终失败理由只能是：无法搜索或核验到目标诗词的完整可靠全文，或用户提供的信息不足以唯一确定目标。若能找到完整全文，就必须先按规范重排 content、translation、annotation，再返回 add_poem 或 add_poems。
+- 返回 add_poem/add_poems 前必须做一次内部校对：content 是否每个诗句一行、标点是否保留、annotation 行号是否没有超过 content 的非空行数。校对不通过时，必须自行修正后再返回，不能要求用户“重新整理格式”。
 - 内容格式规范：
   - 写入数据库的字段必须是可直接显示和保存的纯文本，不能包含 Markdown 标记。
   - content 必须是完整原文，按诗句或词句的传统节奏单位换行，一句一行；不要只按句号、问号、叹号机械换行。
@@ -263,12 +272,13 @@ JSON 格式只能是以下七类之一：
   - preface 只填写题前序、词前小序或作者原有题注，例如“丙辰中秋，欢饮达旦……兼怀子由。”；不要把序混入 content，也不要把普通备注写入 preface。
   - 长篇歌行、古体诗仍按诗句单位换行；如权威通行版本有明显分段，可用空行保留分段。
   - translation 尽量与 content 行数和顺序对应，一句译文一行；无法逐句对应时，按自然段保持可读。
-  - annotation 使用“[行号] 注释内容”的格式，一条注释一行；这里的行号不是注释序号，而是 content 中从 1 开始计算的原文行号，空行不计入行号。
+  - annotation 使用“[行号] 注释内容”的格式，一条注释一行；这里的行号不是注释序号。正文行号从 content 中第 1 个非空原文行开始计算，空行不计入行号。
+  - annotation 可以使用 [0] 表示标题注释，专门解释标题、词牌、题中地名、人名、典故或题下注关键信息；[0] 不对应正文行。
   - annotation 的 [行号] 必须对应“最终 content 分行后”的原文行号；不要按逗号数量、语义句数量、注释条目数量或搜索来源原段落编号来编号。
-  - annotation 的所有行都必须以 [行号] 开头，且行号不得超过 content 的非空原文行数。例如 content 有 4 行时，只能使用 [1]、[2]、[3]、[4]。
+  - annotation 的所有行都必须以 [行号] 开头，且除 [0] 标题注释外，正文行号不得超过 content 的非空原文行数。例如 content 有 4 行时，只能使用 [0]、[1]、[2]、[3]、[4]。
   - 同一原文行有多个注释时，可以写多条相同 [行号]，例如 “[3] 翔：这里指奔走、跳跃。”
   - 长篇诗文的 annotation 不必逐行覆盖，优先给出能准确对齐原文行号的关键注释；不能确认行号的注释宁可省略，不要编造或使用超出 content 行数的行号。
-  - 返回前必须自检：annotation 中最大的 [行号] 不能超过 content 的非空原文行数。
+  - 返回前必须自检：annotation 中最大的正文 [行号] 不能超过 content 的非空原文行数；[0] 只用于标题注释。
   - learning_note 是用户个人学习笔记，可写个人理解、疑问、记忆方法、课堂笔记或待复习点；添加新诗时除非用户明确要求，一般留空。
   - appreciation 使用自然段，不强制编号；重点写主题、情感、结构、艺术手法和学习提示。
   - remark 只在需要区分同名诗时填写，例如首句、常用别名。
@@ -330,8 +340,10 @@ JSON 格式只能是以下七类之一：
         final learningNote = poem.learningNote.trim().isEmpty
             ? ''
             : '，笔记片段：${_compact(poem.learningNote, maxLength: 48)}';
+        final prosody = _compact(_prosodySummaryForList(poem), maxLength: 120);
+        final prosodyText = prosody.isEmpty ? '' : '，格律：$prosody';
         lines.add(
-          '- poem_id=$id，《${poem.title}》，$dynasty，$author$remark$preface，内容片段：$content$translation$learningNote$appreciation',
+          '- poem_id=$id，《${poem.title}》，$dynasty，$author$remark$preface，内容片段：$content$translation$learningNote$appreciation$prosodyText',
         );
       }
     }
@@ -367,7 +379,58 @@ ${_emptyAsNone(poem.learningNote)}
 
 appreciation:
 ${_emptyAsNone(poem.appreciation)}
+
+prosody:
+system: ${poem.prosodySystem}
+form: ${poem.prosodyForm}
+rhyme_book: ${poem.prosodyRhymeBook}
+note: ${_emptyAsNone(poem.prosodyNote)}
+overrides_json:
+${_emptyAsNone(poem.prosodyOverridesJson)}
+
+prosody_candidates:
+${_buildProsodyCandidateBlock(poem)}
 ''';
+  }
+
+  String _buildProsodyCandidateBlock(Poem poem) {
+    final candidates = findProsodyCalibrationCandidates(poem);
+    if (candidates.isEmpty) {
+      return '（暂无需要确认的多音字或多韵韵脚）';
+    }
+    return candidates.map((candidate) {
+      final options = candidate.matches.isEmpty
+          ? '无本地韵书候选'
+          : candidate.matches.map((entry) => entry.label).join('、');
+      return '- line=${candidate.lineNumber}, char_index=${candidate.charIndex}, '
+          'char=${candidate.character}, current=${candidate.currentTone}, '
+          'is_rhyme_foot=${candidate.isRhymeFoot}, options=$options';
+    }).join('\n');
+  }
+
+  String _prosodySummaryForList(Poem poem) {
+    if (!poem.prosodySupported || !poem.prosodyEnabled) {
+      return '';
+    }
+    final candidates = findProsodyCalibrationCandidates(poem);
+    final candidateText = candidates.isEmpty
+        ? '暂无候选'
+        : candidates
+            .take(8)
+            .map((candidate) {
+              final options = candidate.matches.isEmpty
+                  ? '无候选'
+                  : candidate.matches.map((entry) => entry.label).join('/');
+              return '第${candidate.lineNumber}行第${candidate.charIndex}字“${candidate.character}”(${candidate.currentTone}, $options)';
+            })
+            .join('；');
+    return [
+      prosodySystemLabel(poem.prosodySystem),
+      if (poem.prosodyForm.trim().isNotEmpty) poem.prosodyForm.trim(),
+      if (poem.prosodyRhymeBook.trim().isNotEmpty)
+        poem.prosodyRhymeBook.trim(),
+      '候选：$candidateText',
+    ].join('，');
   }
 }
 
@@ -521,6 +584,32 @@ class PoemAgentDraft {
         content.trim().isNotEmpty;
   }
 
+  PoemAgentDraft copyWith({
+    String? title,
+    String? author,
+    String? dynasty,
+    String? preface,
+    String? content,
+    String? remark,
+    String? translation,
+    String? annotation,
+    String? learningNote,
+    String? appreciation,
+  }) {
+    return PoemAgentDraft(
+      title: title ?? this.title,
+      author: author ?? this.author,
+      dynasty: dynasty ?? this.dynasty,
+      preface: preface ?? this.preface,
+      content: content ?? this.content,
+      remark: remark ?? this.remark,
+      translation: translation ?? this.translation,
+      annotation: annotation ?? this.annotation,
+      learningNote: learningNote ?? this.learningNote,
+      appreciation: appreciation ?? this.appreciation,
+    );
+  }
+
   factory PoemAgentDraft.fromMap(Map<String, Object?> map) {
     return PoemAgentDraft(
       title: _plainTextFromModel(map['title']),
@@ -553,6 +642,8 @@ class PoemAgentUpdates {
     'annotation',
     'learning_note',
     'appreciation',
+    'prosody_overrides_json',
+    'prosody_note',
   };
 
   static const _fieldLabels = <String, String>{
@@ -566,6 +657,8 @@ class PoemAgentUpdates {
     'annotation': '注释',
     'learning_note': '学习笔记',
     'appreciation': '赏析',
+    'prosody_overrides_json': '格律校准',
+    'prosody_note': '格律说明',
   };
 
   final Map<String, String> values;
@@ -594,6 +687,12 @@ class PoemAgentUpdates {
           values.containsKey('learning_note') ? values['learning_note'] : null,
       appreciation:
           values.containsKey('appreciation') ? values['appreciation'] : null,
+      prosodyOverridesJson: values.containsKey('prosody_overrides_json')
+          ? values['prosody_overrides_json']
+          : null,
+      prosodyNote: values.containsKey('prosody_note')
+          ? values['prosody_note']
+          : null,
     );
   }
 
@@ -605,7 +704,12 @@ class PoemAgentUpdates {
       if (!_allowedFields.contains(key) || entry.value == null) {
         continue;
       }
-      values[key] = _plainTextFromModel(entry.value);
+      if (key == 'prosody_overrides_json' &&
+          (entry.value is Map || entry.value is List)) {
+        values[key] = jsonEncode(entry.value);
+      } else {
+        values[key] = _plainTextFromModel(entry.value);
+      }
     }
 
     return PoemAgentUpdates(values: Map.unmodifiable(values));

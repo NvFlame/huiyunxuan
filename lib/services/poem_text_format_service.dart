@@ -83,15 +83,50 @@ PoemTextFormatIssue? validatePoemAnnotationLineNumbers({
 
     final lineNumber = int.tryParse(match.group(1)!);
     if (lineNumber == null ||
-        lineNumber < 1 ||
+        lineNumber < 0 ||
         lineNumber > contentLineCount) {
       return PoemTextFormatIssue(
-        '注释第 ${index + 1} 行使用了 [$lineNumber]，但原文只有 $contentLineCount 个非空行。',
+        '注释第 ${index + 1} 行使用了 [$lineNumber]，但原文只有 $contentLineCount 个非空行；[0] 仅用于标题注释。',
       );
     }
   }
 
   return null;
+}
+
+String normalizePoemContentLayout(
+  String content, {
+  String title = '',
+}) {
+  final rawLines = content
+      .replaceAll('\r\n', '\n')
+      .replaceAll('\r', '\n')
+      .split('\n');
+  final lines = <String>[];
+  final canSplitByStandardVerse = !_looksLikeCiOrQuTitle(title);
+
+  for (final rawLine in rawLines) {
+    final line = rawLine.trim();
+    if (line.isEmpty) {
+      if (lines.isNotEmpty && lines.last.isNotEmpty) {
+        lines.add('');
+      }
+      continue;
+    }
+
+    final splitLines =
+        canSplitByStandardVerse ? _splitStandardVerseLine(line) : null;
+    if (splitLines == null) {
+      lines.add(line);
+    } else {
+      lines.addAll(splitLines);
+    }
+  }
+
+  while (lines.isNotEmpty && lines.last.isEmpty) {
+    lines.removeLast();
+  }
+  return lines.join('\n').trim();
 }
 
 List<String> _contentLines(String content) {
