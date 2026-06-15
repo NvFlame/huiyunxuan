@@ -65,16 +65,25 @@ class PoemAgentService {
       );
     }
 
-    final searchResult = await searchService.search(
-      config: config,
-      query: initialResult.searchQuery!,
-    );
-    if (searchResult.isEmpty) {
+    final searchQueries = initialResult.effectiveSearchQueries.take(5).toList();
+    final searchResults = <WebSearchResult>[];
+    final sourceLines = <String>[];
+    for (final query in searchQueries) {
+      final result = await searchService.search(
+        config: config,
+        query: query,
+      );
+      searchResults.add(result);
+      sourceLines.addAll(result.sourceLines);
+    }
+
+    if (searchResults.every((result) => result.isEmpty)) {
       return PoemAgentResult(
         type: 'not_found',
         message: '联网搜索没有返回可用结果，因此没有执行入库或修改。',
-        searchQuery: initialResult.searchQuery,
-        searchSources: searchResult.sourceLines,
+        searchQuery: searchQueries.join('；'),
+        searchQueries: searchQueries,
+        searchSources: sourceLines,
       );
     }
 
@@ -89,7 +98,7 @@ class PoemAgentService {
             currentCollection: currentCollection,
             focusPoem: focusPoem,
             searchAvailable: true,
-            searchResult: searchResult,
+            searchResults: searchResults,
           ),
         },
         _latestRequestMessage(latestUserRequest),
@@ -104,8 +113,9 @@ class PoemAgentService {
         },
         {
           'role': 'system',
-          'content': 'App 已根据 query="${initialResult.searchQuery}" 完成联网搜索。'
-              '请根据上方搜索结果返回最终 JSON，不要再次返回 search。'
+          'content': 'App 已根据以下 query 完成联网搜索：${searchQueries.join('；')}。'
+              '请逐一处理用户本轮要求的每一首诗，不能因为某一个 query 的结果里没有另一首诗就判断另一首不存在。'
+              '如果是批量添加，能确认全部诗词时优先返回 add_poems。不要再次返回 search 或 search_batch。'
               '最终结果只能围绕“本轮用户最新请求”，不得把历史对话中的其它诗题、其它添加任务或旧搜索结果当作当前目标。',
         },
       ],
@@ -114,15 +124,17 @@ class PoemAgentService {
     final finalResult = PoemAgentResult.fromJsonText(
       finalContent,
       currentCollectionId: currentCollection?.id,
-      searchQuery: initialResult.searchQuery,
-      searchSources: searchResult.sourceLines,
+      searchQuery: searchQueries.join('；'),
+      searchQueries: searchQueries,
+      searchSources: sourceLines,
     );
     if (finalResult.shouldSearch) {
       return PoemAgentResult(
         type: 'ask',
-        message: '我已经完成一次联网搜索，但仍无法唯一确认可执行结果。请补充作者、首句、目标诗词库或其它限定信息。',
-        searchQuery: initialResult.searchQuery,
-        searchSources: searchResult.sourceLines,
+        message: '我已经完成联网搜索，但仍无法唯一确认可执行结果。请补充作者、首句、目标诗词库或其它限定信息。',
+        searchQuery: searchQueries.join('；'),
+        searchQueries: searchQueries,
+        searchSources: sourceLines,
       );
     }
     return finalResult;
@@ -134,7 +146,7 @@ class PoemAgentService {
     required PoemCollection? currentCollection,
     required Poem? focusPoem,
     required bool searchAvailable,
-    WebSearchResult? searchResult,
+    List<WebSearchResult> searchResults = const <WebSearchResult>[],
   }) {
     final collectionLines = collections.isEmpty
         ? '（暂无诗词库）'
@@ -158,17 +170,18 @@ class PoemAgentService {
     final focusContext = focusPoem == null
         ? ''
         : '当前学习模式聚焦诗词：poem_id=${focusPoem.id}，《${focusPoem.title}》，${focusPoem.dynasty}，${focusPoem.author}。用户说“这首诗”“当前诗”“这句”时，默认指这首诗；涉及修改时应优先使用这个 poem_id。若用户要求补充或更正译文、注释、学习笔记、赏析，且可确定内容，应直接返回 update_poem 写回诗词库；若用户说的内容与它明显不符，必须追问确认。';
-    final searchState = searchResult == null
+    final hasSearchResults = searchResults.isNotEmpty;
+    final searchState = !hasSearchResults
         ? searchAvailable
-            ? '联网搜索已启用。若用户要求添加新诗、核验原文事实、校正作者朝代、或要求依据外部资料补充内容，先确认目标库和诗词身份是否唯一；若仍不唯一则 ask，若已经唯一且本轮尚无搜索结果，则必须先返回 search 动作，让 App 先联网检索。若用户只是要求基于当前聚焦诗词的已有内容调整措辞、整理注释格式、改写译文、补充学习笔记或润色赏析，且不需要外部事实核验，可以直接返回 update_poem。'
+            ? '联网搜索已启用。若用户要求添加新诗、核验原文事实、校正作者朝代、或要求依据外部资料补充内容，先确认目标库和诗词身份是否唯一；若仍不唯一则 ask，若已经唯一且本轮尚无搜索结果，则必须先返回 search 或 search_batch 动作，让 App 先联网检索。若用户只是要求基于当前聚焦诗词的已有内容调整措辞、整理注释格式、改写译文、补充学习笔记或润色赏析，且不需要外部事实核验，可以直接返回 update_poem。'
             : '联网搜索未启用。不要声称已经联网搜索；如果需要外部核验，应 ask 用户配置联网搜索或补充资料。'
-        : 'App 已完成联网搜索。你必须优先依据下方搜索结果返回最终动作，不得再次返回 search。若搜索结果不足、冲突或无法核验，应返回 ask 或 not_found。';
-    final searchBlock = searchResult == null
+        : 'App 已完成联网搜索。你必须优先依据下方搜索结果返回最终动作，不得再次返回 search 或 search_batch。若是批量搜索，必须逐一检查每个搜索分组，不能用某一组结果否定另一首诗。若搜索结果不足、冲突或无法核验，应返回 ask 或 not_found。';
+    final searchBlock = !hasSearchResults
         ? ''
         : '''
 
 联网搜索结果：
-${searchResult.toPromptText()}
+${_buildSearchResultsBlock(searchResults)}
 ''';
 
     return '''
@@ -209,34 +222,40 @@ annotation:
 
 你必须严格只返回一个 JSON 对象，不要使用 Markdown，不要输出 JSON 之外的任何文字。
 
-JSON 格式只能是以下七类之一：
+JSON 格式只能是以下八类之一：
 1. 需要追问：
 {"type":"ask","message":"你的追问"}
 
 2. 需要联网搜索：
 {"type":"search","message":"我需要先联网核验","query":"作者 标题 全文 译文 注释 赏析"}
 
-3. 可以添加诗词：
+3. 需要批量联网搜索：
+{"type":"search_batch","message":"我需要分别核验这些诗词","queries":["作者A 标题A 首句A 全文 译文 注释 赏析","作者B 标题B 首句B 全文 译文 注释 赏析"]}
+
+4. 可以添加诗词：
 {"type":"add_poem","message":"简短说明","collection_id":1,"poem":{"title":"标题","author":"作者","dynasty":"朝代","preface":"序或小序，没有则留空","content":"诗词全文，一行一句","remark":"","translation":"译文","annotation":"注释","learning_note":"","appreciation":"赏析"}}
 
-4. 可以一次添加多首诗词：
+5. 可以一次添加多首诗词：
 {"type":"add_poems","message":"简短说明","collection_id":1,"poems":[{"title":"标题","author":"作者","dynasty":"朝代","preface":"序或小序，没有则留空","content":"诗词全文，一行一句","remark":"","translation":"译文","annotation":"注释","learning_note":"","appreciation":"赏析"},{"title":"标题","author":"作者","dynasty":"朝代","preface":"序或小序，没有则留空","content":"诗词全文，一行一句","remark":"","translation":"译文","annotation":"注释","learning_note":"","appreciation":"赏析"}]}
 
-5. 可以更新已有诗词元素：
+6. 可以更新已有诗词元素：
 {"type":"update_poem","message":"简短说明","poem_id":12,"updates":{"translation":"新的译文","annotation":"新的注释","learning_note":"新的学习笔记","appreciation":"新的赏析内容"}}
 如果用户明确要求确认多音字平仄或韵脚韵部，可返回：
 {"type":"update_poem","message":"简短说明","poem_id":12,"updates":{"prosody_overrides_json":{"items":[{"line":4,"char_index":5,"char":"上","tone":"仄","rhyme":"去声二十三漾","note":"方位词，表示在青苔上面"}]}}}
 
-6. 确认不存在或无法查到：
+7. 确认不存在或无法查到：
 {"type":"not_found","message":"说明为什么不执行操作"}
 
-7. 普通回答：
+8. 普通回答：
 {"type":"answer","message":"回答内容"}
 
 规则：
-- search 只能在联网搜索已启用且本轮没有搜索结果时返回；一旦已有搜索结果，不得再次返回 search。
-- search.query 应包含作者、标题、首句、全文、译文、注释、赏析等能帮助检索的关键词；一次添加多首诗时，query 可以包含所有诗题和作者。
+- search/search_batch 只能在联网搜索已启用且本轮没有搜索结果时返回；一旦已有搜索结果，不得再次返回 search 或 search_batch。
+- search.query 应包含作者、标题、首句、全文、译文、注释、赏析等能帮助检索的关键词。
+- 一次添加多首诗时，必须优先返回 search_batch，每首诗一个 query；不要把多首诗挤进同一个 query。每个 query 都要包含该诗自己的作者、标题、首句或用户提供的识别短语。
 - 如果用户提供了首句、长题片段或别名，search.query 必须原样包含这些短语；不要把用户给出的首句省略掉，也不要只用简称搜索。
+- 如果上一轮是一次添加多首诗词的未完成任务，而本轮用户只是澄清其中一首、说“选择……”“先添加……”“继续添加……”，必须把本轮视为同一批量任务的继续；除非用户明确说“只添加这一首”“取消其它”，不要把其它待添加诗词视为取消。
+- 如果批量搜索结果中某一组没有另一首诗的信息，这只说明该组 query 与另一首无关，不能据此判断另一首不存在；必须查看对应另一首的搜索分组。
 - App 会自动优先搜索古文岛、古诗文库、百度百科、百度汉语、维基文库、中华诗词、搜韵等来源；如果搜索结果中有这些来源，必须优先依据它们。新闻、论坛、个人站、泛内容站只能作辅助，不能作为添加长诗全文的唯一依据。
 - 每次执行添加、搜索或更新时，目标必须以“本轮用户最新请求”为准；历史对话只用于理解必要的澄清，不得把历史中的其它诗题、旧搜索结果或旧添加任务当成当前目标。
 - 所有 message、translation、annotation、learning_note、appreciation 等文本字段都必须使用纯文本，不要使用 Markdown 标记；不要输出 **粗体**、# 标题、> 引用、```代码块``` 或反引号。
@@ -244,7 +263,8 @@ JSON 格式只能是以下七类之一：
 - 即使只是普通问答、赏析或解释，也必须返回 {"type":"answer","message":"回答内容"}，不要直接输出自然语言正文。
 - 用户要求添加诗词时，如果目标库不唯一，必须先追问。
 - 用户要求添加诗词时，如果诗词不唯一，例如“无题”这类同名诗，必须先追问作者、首句或其它可唯一识别的信息。
-- 用户要求一次添加多首诗词，且所有诗词都能唯一确认时，返回 add_poems；如果其中任何一首不唯一或无法确认，必须先 ask，不能部分入库。
+- 用户要求一次添加多首诗词，且所有诗词都能唯一确认、并且已经拥有可靠完整全文时，返回 add_poems；如果还没有搜索或资料不足，先返回 search_batch；如果其中任何一首不唯一或无法确认，必须先 ask，不能部分入库。
+- 批量添加的最终动作不能只处理其中一首然后结束；除非用户明确说“只添加这一首”，否则必须继续处理同一批任务里的其它诗词。
 - 用户要求修改、丰富、纠错、补充译文、补充注释、补充学习笔记或补充赏析时，必须先从“当前可编辑诗词清单”中确定唯一 poem_id；如果候选不唯一，必须追问并列出可区分的信息。
 - update_poem 的 updates 只能包含 title、author、dynasty、preface、content、remark、translation、annotation、learning_note、appreciation、prosody_overrides_json、prosody_note 这些字段，且只包含真正需要修改的字段。
 - update_poem 的字段值必须是该字段“更新后的完整内容”，不是局部补丁；例如只修改 annotation 中某个词条时，也必须在 annotation 中返回保留其它原有注释后的完整注释文本。
@@ -432,6 +452,19 @@ ${_buildProsodyCandidateBlock(poem)}
       '候选：$candidateText',
     ].join('，');
   }
+
+  String _buildSearchResultsBlock(List<WebSearchResult> results) {
+    if (results.length == 1) {
+      return results.first.toPromptText();
+    }
+    return [
+      for (var index = 0; index < results.length; index += 1)
+        [
+          '【搜索 ${index + 1}】',
+          results[index].toPromptText(),
+        ].join('\n'),
+    ].join('\n\n');
+  }
 }
 
 class PoemAgentMessage {
@@ -466,7 +499,9 @@ Map<String, String> _latestRequestMessage(String latestUserRequest) {
   final content = latestUserRequest.trim().isEmpty
       ? '本轮用户最新请求为空；如信息不足，应 ask。'
       : '本轮用户最新请求：$latestUserRequest\n'
-          '除非用户明确要求延续前文，否则添加、搜索、更新、入库的目标只能来自本轮最新请求和必要的澄清上下文。';
+          '添加、搜索、更新、入库的目标原则上只能来自本轮最新请求和必要的澄清上下文。'
+          '如果紧邻上文存在尚未完成的同一批量添加任务，而本轮只是选择、确认、先添加或继续其中一项，可以延续该批量任务；'
+          '除此之外，不得把更早历史里的其它诗题、旧搜索或旧添加任务当作当前目标。';
   return {'role': 'system', 'content': content};
 }
 
@@ -482,6 +517,7 @@ class PoemAgentResult {
     this.poemId,
     this.updates,
     this.searchQuery,
+    this.searchQueries = const <String>[],
     this.searchSources = const <String>[],
   });
 
@@ -493,6 +529,7 @@ class PoemAgentResult {
   final int? poemId;
   final PoemAgentUpdates? updates;
   final String? searchQuery;
+  final List<String> searchQueries;
   final List<String> searchSources;
 
   bool get shouldAddPoem => type == 'add_poem' && poem != null;
@@ -501,13 +538,30 @@ class PoemAgentResult {
     return type == 'update_poem' && poemId != null && updates != null;
   }
   bool get shouldSearch {
-    return type == 'search' && (searchQuery?.trim().isNotEmpty ?? false);
+    return (type == 'search' || type == 'search_batch') &&
+        effectiveSearchQueries.isNotEmpty;
+  }
+
+  List<String> get effectiveSearchQueries {
+    final queries = <String>[];
+    for (final query in searchQueries) {
+      final trimmed = query.trim();
+      if (trimmed.isNotEmpty && !queries.contains(trimmed)) {
+        queries.add(trimmed);
+      }
+    }
+    final singleQuery = searchQuery?.trim() ?? '';
+    if (singleQuery.isNotEmpty && !queries.contains(singleQuery)) {
+      queries.add(singleQuery);
+    }
+    return List.unmodifiable(queries);
   }
 
   factory PoemAgentResult.fromJsonText(
     String text, {
     required int? currentCollectionId,
     String? searchQuery,
+    List<String> searchQueries = const <String>[],
     List<String> searchSources = const <String>[],
   }) {
     final jsonObject = _tryExtractJsonObject(text);
@@ -516,6 +570,8 @@ class PoemAgentResult {
       return PoemAgentResult(
         type: 'answer',
         message: fallbackMessage.isEmpty ? '模型返回了空内容。' : fallbackMessage,
+        searchQuery: searchQuery,
+        searchQueries: searchQueries,
         searchSources: searchSources,
       );
     }
@@ -533,8 +589,15 @@ class PoemAgentResult {
     final rawPoem = _readObjectMap(map['poem']);
     final rawPoems = map['poems'];
     final rawUpdates = _readObjectMap(map['updates']);
+    final parsedQueries = _readStringList(map['queries']);
     final resultSearchQuery =
         ((map['query'] as String?) ?? searchQuery)?.trim();
+    final allQueries = <String>[
+      ...searchQueries,
+      ...parsedQueries,
+      if (resultSearchQuery != null && resultSearchQuery.isNotEmpty)
+        resultSearchQuery,
+    ];
 
     return PoemAgentResult(
       type: type,
@@ -548,6 +611,7 @@ class PoemAgentResult {
           resultSearchQuery == null || resultSearchQuery.isEmpty
               ? null
               : resultSearchQuery,
+      searchQueries: List.unmodifiable(_uniqueNonEmptyStrings(allQueries)),
       searchSources: searchSources,
     );
   }
@@ -802,6 +866,26 @@ List<PoemAgentDraft> _readPoemDraftList(Object? value) {
     drafts.add(PoemAgentDraft.fromMap(map));
   }
   return List.unmodifiable(drafts);
+}
+
+List<String> _readStringList(Object? value) {
+  if (value is! List) {
+    return const <String>[];
+  }
+  return List.unmodifiable(_uniqueNonEmptyStrings([
+    for (final item in value) item.toString(),
+  ]));
+}
+
+List<String> _uniqueNonEmptyStrings(Iterable<String> values) {
+  final result = <String>[];
+  for (final value in values) {
+    final trimmed = value.trim();
+    if (trimmed.isNotEmpty && !result.contains(trimmed)) {
+      result.add(trimmed);
+    }
+  }
+  return result;
 }
 
 int? _readInt(Object? value) {
