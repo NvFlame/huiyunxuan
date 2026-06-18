@@ -1005,6 +1005,26 @@ ORDER BY cp.created_at ASC, pe.title ASC
     return rows.map(Poem.fromMap).toList();
   }
 
+  Future<Poem?> getPoemById(int poemId, {int? collectionId}) async {
+    final db = await database;
+    final rows = await db.rawQuery(
+      '''
+SELECT pe.*, cp.collection_id
+FROM poem_elements pe
+INNER JOIN collection_poems cp ON cp.poem_id = pe.id
+WHERE pe.id = ?
+${collectionId == null ? '' : 'AND cp.collection_id = ?'}
+ORDER BY cp.created_at ASC
+LIMIT 1
+''',
+      collectionId == null ? [poemId] : [poemId, collectionId],
+    );
+    if (rows.isEmpty) {
+      return null;
+    }
+    return Poem.fromMap(rows.first);
+  }
+
   Future<Set<int>> getPoemCollectionIds(int poemId) async {
     final db = await database;
     final rows = await db.query(

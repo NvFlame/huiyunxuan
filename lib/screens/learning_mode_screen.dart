@@ -1,3 +1,6 @@
+import 'dart:async';
+
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 
@@ -5,6 +8,7 @@ import '../data/app_database.dart';
 import '../models/poem.dart';
 import '../models/poem_collection.dart';
 import '../services/prosody_ai_service.dart';
+import '../services/regulated_verse_checker.dart';
 import '../widgets/prosody_calibration_dialog.dart';
 import '../widgets/prosody_panel.dart';
 import '../widgets/tone_marked_text.dart';
@@ -38,6 +42,9 @@ class _LearningModeScreenState extends State<LearningModeScreen> {
   int _previewToken = 0;
   bool _showToneMarks = false;
   bool _prosodyCalibrating = false;
+  final _poemContentKey = GlobalKey<_PoemContentViewState>();
+  bool _contentSelectionActive = false;
+  bool _contentSelectionWasActiveOnPointerDown = false;
   bool _loading = true;
   String? _error;
 
@@ -313,7 +320,7 @@ class _LearningModeScreenState extends State<LearningModeScreen> {
     }
   }
 
-  Future<void> _openPoemChat() async {
+  Future<void> _openPoemChat({String? initialInput}) async {
     final collection = _selectedCollection;
     final poem = _currentPoem;
     if (collection == null || poem == null) {
@@ -326,6 +333,7 @@ class _LearningModeScreenState extends State<LearningModeScreen> {
         builder: (context) => PoemAgentChatScreen(
           currentCollection: collection,
           focusPoem: poem,
+          initialInput: initialInput,
         ),
       ),
     );
@@ -334,25 +342,28 @@ class _LearningModeScreenState extends State<LearningModeScreen> {
     }
   }
 
-  Future<void> _editLearningNote(Poem poem) async {
-    final result = await showDialog<String>(
-      context: context,
-      builder: (context) => _LearningNoteDialog(initialNote: poem.learningNote),
-    );
-
-    if (result == null || !mounted) {
-      return;
-    }
-
-    final nextNote = result.trim();
+  Future<void> _saveLearningNote(Poem poem, String note) async {
+    final nextNote = note.trim();
     if (nextNote == poem.learningNote.trim()) {
       return;
     }
 
+    final updatedPoem = poem.copyWith(learningNote: nextNote);
     await AppDatabase.instance.updatePoem(
-      poem.copyWith(learningNote: nextNote),
+      updatedPoem,
     );
-    await _reloadCurrentCollection(preferredPoemId: poem.id);
+    if (!mounted) {
+      return;
+    }
+    setState(() {
+      final index = _poems.indexWhere((item) => item.id == poem.id);
+      if (index < 0) {
+        return;
+      }
+      final poems = List<Poem>.of(_poems);
+      poems[index] = updatedPoem;
+      _poems = List.unmodifiable(poems);
+    });
   }
 
   Future<void> _openProsodyCalibrationDialog(Poem poem) async {
@@ -527,6 +538,43 @@ class _LearningModeScreenState extends State<LearningModeScreen> {
     ScaffoldMessenger.of(context)
       ..hideCurrentSnackBar()
       ..showSnackBar(SnackBar(content: Text(message)));
+  }
+
+  void _handleLearningPointerDown(PointerDownEvent event) {
+    final contentState = _poemContentKey.currentState;
+    final selectionActive =
+        _contentSelectionActive || (contentState?.hasActiveSelection ?? false);
+    _contentSelectionWasActiveOnPointerDown = selectionActive;
+    if (!selectionActive || contentState == null) {
+      return;
+    }
+    if (!contentState.containsGlobalPosition(event.position)) {
+      contentState.clearTextSelection();
+    }
+  }
+
+  void _handleContentSelectionActiveChanged(bool active) {
+    if (_contentSelectionActive == active || !mounted) {
+      return;
+    }
+    setState(() {
+      _contentSelectionActive = active;
+    });
+  }
+
+  void _handleToneDetailsChanged(bool value) {
+    if (value &&
+        (_contentSelectionActive || _contentSelectionWasActiveOnPointerDown)) {
+      _contentSelectionWasActiveOnPointerDown = false;
+      _poemContentKey.currentState?.clearTextSelection();
+      _showSnackBar('请先取消文本选择，再开启格律审查');
+      return;
+    }
+
+    _contentSelectionWasActiveOnPointerDown = false;
+    setState(() {
+      _showToneMarks = value;
+    });
   }
 
   void _jumpToAnnotationLine(int lineNumber, _ParsedAnnotation annotation) {
@@ -727,9 +775,9 @@ class _LearningModeScreenState extends State<LearningModeScreen> {
       floatingActionButton: poem == null
           ? null
           : FloatingActionButton.extended(
-              onPressed: _openPoemChat,
+              onPressed: () => _openPoemChat(),
               icon: const Icon(Icons.smart_toy_outlined),
-              label: const Text('问老师'),
+              label: const Text('问道'),
             ),
     );
   }
@@ -741,7 +789,7 @@ class _LearningModeScreenState extends State<LearningModeScreen> {
     if (_error != null) {
       return _LearningMessageView(
         icon: Icons.error_outline,
-        title: '学习模式读取失败',
+        title: '学文读取失败',
         message: _error!,
       );
     }
@@ -763,7 +811,7 @@ class _LearningModeScreenState extends State<LearningModeScreen> {
       return const _LearningMessageView(
         icon: Icons.error_outline,
         title: '没有可学习的诗词',
-        message: '请返回后重新进入学习模式。',
+        message: '请返回后重新进入学文。',
       );
     }
 
@@ -775,18 +823,25 @@ class _LearningModeScreenState extends State<LearningModeScreen> {
       _annotationLineKeys.putIfAbsent(lineNumber, () => GlobalKey());
     }
 
-    return Stack(
-      children: [
-        SingleChildScrollView(
+    return Listener(
+      behavior: HitTestBehavior.translucent,
+      onPointerDown: _handleLearningPointerDown,
+      child: Stack(
+        children: [
+          SingleChildScrollView(
           key: _learningListKey,
           controller: _learningScrollController,
           padding: const EdgeInsets.fromLTRB(52, 14, 52, 120),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              _PoemLearningHeader(poem: poem),
+              _PoemLearningHeader(
+                poem: poem,
+                onAskAi: (text) => _openPoemChat(initialInput: text),
+              ),
               const SizedBox(height: 12),
               _PoemContentView(
+                key: _poemContentKey,
                 poem: poem,
                 showToneMarks: _showToneMarks &&
                     poem.prosodySupported &&
@@ -796,21 +851,20 @@ class _LearningModeScreenState extends State<LearningModeScreen> {
                 onLineNumberTap: (lineNumber) {
                   _jumpToAnnotationLine(lineNumber, parsedAnnotation);
                 },
-                onLineLongPress: (lineNumber) {
+                onLineTap: (lineNumber) {
                   _showLineAnnotationPreview(lineNumber, parsedAnnotation);
                 },
+                onAskAi: (text) => _openPoemChat(initialInput: text),
                 onDismissPreview: _hideLineAnnotationPreview,
+                onSelectionActiveChanged:
+                    _handleContentSelectionActiveChanged,
               ),
               const SizedBox(height: 12),
               ProsodyPanel(
                 poem: poem,
                 showToneDetails: _showToneMarks,
                 calibrationBusy: _prosodyCalibrating,
-                onToneDetailsChanged: (value) {
-                  setState(() {
-                    _showToneMarks = value;
-                  });
-                },
+                onToneDetailsChanged: _handleToneDetailsChanged,
                 onManualCalibration: () => _openProsodyCalibrationDialog(poem),
                 onAiCalibration: () => _runProsodyAiCalibration(poem),
               ),
@@ -830,11 +884,13 @@ class _LearningModeScreenState extends State<LearningModeScreen> {
                   annotation: parsedAnnotation,
                   lineKeys: _annotationLineKeys,
                   highlightedLine: _highlightedAnnotationLine,
+                  onAskAi: (text) => _openPoemChat(initialInput: text),
                 ),
               ),
               _LearningNoteSection(
                 note: poem.learningNote,
-                onEdit: () => _editLearningNote(poem),
+                onChanged: (note) => _saveLearningNote(poem, note),
+                onAskAi: (text) => _openPoemChat(initialInput: text),
               ),
               _LearningSection(
                 title: '译文',
@@ -843,6 +899,7 @@ class _LearningModeScreenState extends State<LearningModeScreen> {
                 child: _SelectableBlock(
                   text: poem.translation,
                   emptyText: '暂无译文。可以在编辑页补充，也可以让智能体补全。',
+                  onAskAi: (text) => _openPoemChat(initialInput: text),
                 ),
               ),
               _LearningSection(
@@ -852,13 +909,14 @@ class _LearningModeScreenState extends State<LearningModeScreen> {
                 child: _SelectableBlock(
                   text: poem.appreciation,
                   emptyText: '暂无赏析。可以让智能体先生成一个学习版赏析。',
+                  onAskAi: (text) => _openPoemChat(initialInput: text),
                 ),
               ),
             ],
           ),
         ),
-        if (_returnScrollOffset != null)
-          Positioned(
+          if (_returnScrollOffset != null)
+            Positioned(
             left: 52,
             right: 52,
             bottom: 18,
@@ -870,7 +928,7 @@ class _LearningModeScreenState extends State<LearningModeScreen> {
               ),
             ),
           ),
-        Positioned(
+          Positioned(
           left: 6,
           top: 0,
           bottom: 0,
@@ -883,7 +941,7 @@ class _LearningModeScreenState extends State<LearningModeScreen> {
             ),
           ),
         ),
-        Positioned(
+          Positioned(
           right: 6,
           top: 0,
           bottom: 0,
@@ -896,8 +954,9 @@ class _LearningModeScreenState extends State<LearningModeScreen> {
               icon: const Icon(Icons.chevron_right),
             ),
           ),
-        ),
-      ],
+          ),
+        ],
+      ),
     );
   }
 }
@@ -932,7 +991,7 @@ class _LearningTitle extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final collectionName = collection?.name ?? '学习模式';
+    final collectionName = collection?.name ?? '学文';
     final progress = total == 0 ? '暂无诗词' : '$currentIndex / $total';
 
     return Column(
@@ -1126,9 +1185,10 @@ class _FavoriteCollectionsDialogState
 }
 
 class _PoemLearningHeader extends StatelessWidget {
-  const _PoemLearningHeader({required this.poem});
+  const _PoemLearningHeader({required this.poem, required this.onAskAi});
 
   final Poem poem;
+  final ValueChanged<String> onAskAi;
 
   @override
   Widget build(BuildContext context) {
@@ -1178,6 +1238,7 @@ class _PoemLearningHeader extends StatelessWidget {
                   const SizedBox(height: 6),
                   SelectableText(
                     poem.preface.trim(),
+                    contextMenuBuilder: _askAiSelectionMenuBuilder(onAskAi),
                     style: theme.textTheme.bodyMedium?.copyWith(height: 1.6),
                   ),
                 ],
@@ -1230,15 +1291,78 @@ class _InfoChip extends StatelessWidget {
   }
 }
 
-class _PoemContentView extends StatelessWidget {
+EditableTextContextMenuBuilder _askAiSelectionMenuBuilder(
+  ValueChanged<String> onAskAi,
+) {
+  return (context, editableTextState) {
+    final value = editableTextState.textEditingValue;
+    final selection = value.selection;
+    final selectedText = selection.isValid && !selection.isCollapsed
+        ? selection.textInside(value.text).trim()
+        : '';
+    final items = <ContextMenuButtonItem>[
+      for (final item in editableTextState.contextMenuButtonItems)
+        if (!_isReadAloudMenuItem(item)) item,
+      if (selectedText.isNotEmpty)
+        ContextMenuButtonItem(
+          label: '问AI',
+          onPressed: () {
+            editableTextState.hideToolbar();
+            onAskAi(selectedText);
+          },
+        ),
+    ];
+
+    return AdaptiveTextSelectionToolbar.buttonItems(
+      anchors: editableTextState.contextMenuAnchors,
+      buttonItems: items,
+    );
+  };
+}
+
+SelectableRegionContextMenuBuilder _askAiRegionMenuBuilder(
+  String Function() selectedTextGetter,
+  ValueChanged<String> onAskAi,
+) {
+  return (context, selectableRegionState) {
+    final selectedText = selectedTextGetter().trim();
+    final items = <ContextMenuButtonItem>[
+      for (final item in selectableRegionState.contextMenuButtonItems)
+        if (!_isReadAloudMenuItem(item)) item,
+      if (selectedText.isNotEmpty)
+        ContextMenuButtonItem(
+          label: '问AI',
+          onPressed: () {
+            selectableRegionState.hideToolbar();
+            onAskAi(selectedText);
+          },
+        ),
+    ];
+
+    return AdaptiveTextSelectionToolbar.buttonItems(
+      anchors: selectableRegionState.contextMenuAnchors,
+      buttonItems: items,
+    );
+  };
+}
+
+bool _isReadAloudMenuItem(ContextMenuButtonItem item) {
+  final label = item.label?.trim().toLowerCase();
+  return label == 'read aloud' || label == '大声朗读';
+}
+
+class _PoemContentView extends StatefulWidget {
   const _PoemContentView({
+    super.key,
     required this.poem,
     required this.showToneMarks,
     required this.previewLineNumber,
     required this.previewNotes,
     required this.onLineNumberTap,
-    required this.onLineLongPress,
+    required this.onLineTap,
+    required this.onAskAi,
     required this.onDismissPreview,
+    required this.onSelectionActiveChanged,
   });
 
   final Poem poem;
@@ -1246,19 +1370,72 @@ class _PoemContentView extends StatelessWidget {
   final int? previewLineNumber;
   final List<String> previewNotes;
   final ValueChanged<int> onLineNumberTap;
-  final ValueChanged<int> onLineLongPress;
+  final ValueChanged<int> onLineTap;
+  final ValueChanged<String> onAskAi;
   final VoidCallback onDismissPreview;
+  final ValueChanged<bool> onSelectionActiveChanged;
+
+  @override
+  State<_PoemContentView> createState() => _PoemContentViewState();
+}
+
+class _PoemContentViewState extends State<_PoemContentView> {
+  final _selectionAreaKey = GlobalKey<SelectionAreaState>();
+  String _selectedText = '';
+
+  bool get hasActiveSelection => _selectedText.isNotEmpty;
+
+  bool containsGlobalPosition(Offset position) {
+    final renderObject = context.findRenderObject();
+    if (renderObject is! RenderBox || !renderObject.hasSize) {
+      return false;
+    }
+    final localPosition = renderObject.globalToLocal(position);
+    return (Offset.zero & renderObject.size).contains(localPosition);
+  }
+
+  void clearTextSelection() {
+    _selectionAreaKey.currentState?.selectableRegion.clearSelection();
+    _setSelectedText('');
+  }
+
+  void _setSelectedText(String text) {
+    final nextText = text.trim();
+    final wasActive = _selectedText.isNotEmpty;
+    final isActive = nextText.isNotEmpty;
+    _selectedText = nextText;
+    if (wasActive != isActive) {
+      widget.onSelectionActiveChanged(isActive);
+    }
+  }
+
+  void _handleSelectionChanged(SelectedContent? content) {
+    _setSelectedText(content?.plainText ?? '');
+  }
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final lines = poem.content
+    final lines = widget.poem.content
         .replaceAll('\r\n', '\n')
         .replaceAll('\r', '\n')
         .split('\n');
+    final regulatedCheck =
+        widget.showToneMarks ? checkRegulatedVerse(widget.poem) : null;
+    final lineChecksByNumber = {
+      for (final line in regulatedCheck?.lines ?? <RegulatedVerseLineCheck>[])
+        line.lineNumber: line,
+    };
+    final relationsByFirstLine = <int, List<RegulatedVerseRelationCheck>>{};
+    for (final relation
+        in regulatedCheck?.relations ?? <RegulatedVerseRelationCheck>[]) {
+      relationsByFirstLine
+          .putIfAbsent(relation.firstLine, () => <RegulatedVerseRelationCheck>[])
+          .add(relation);
+    }
     var lineNumber = 0;
 
-    return DecoratedBox(
+    Widget content = DecoratedBox(
       decoration: BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.circular(8),
@@ -1278,8 +1455,64 @@ class _PoemContentView extends StatelessWidget {
                     lineNumber += 1;
                     final currentLineNumber = lineNumber;
                     final showPreview =
-                        previewLineNumber == currentLineNumber &&
-                            previewNotes.isNotEmpty;
+                        widget.previewLineNumber == currentLineNumber &&
+                            widget.previewNotes.isNotEmpty;
+                    final lineMarks =
+                        lineChecksByNumber[currentLineNumber]?.marks ??
+                            const <RegulatedVerseMark>[];
+                    final relationLabels =
+                        relationsByFirstLine[currentLineNumber] ??
+                            const <RegulatedVerseRelationCheck>[];
+                    final lineRow = Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        SelectionContainer.disabled(
+                          child: SizedBox(
+                            width: 28,
+                            child: InkWell(
+                              borderRadius: BorderRadius.circular(6),
+                              onTap: () => widget.onLineNumberTap(
+                                currentLineNumber,
+                              ),
+                              child: Padding(
+                                padding: const EdgeInsets.symmetric(
+                                  vertical: 3,
+                                ),
+                                child: Text(
+                                  '$currentLineNumber',
+                                  style: theme.textTheme.labelSmall?.copyWith(
+                                    color: const Color(0xFF9A7B2F),
+                                    decoration: TextDecoration.underline,
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ),
+                        ),
+                        Expanded(
+                          child: widget.showToneMarks
+                              ? ToneMarkedLineText(
+                                  line: rawLine.trim(),
+                                  rhymeBook: widget.poem.prosodyRhymeBook,
+                                  lineNumber: currentLineNumber,
+                                  overridesJson:
+                                      widget.poem.prosodyOverridesJson,
+                                  textStyle:
+                                      theme.textTheme.titleMedium?.copyWith(
+                                    height: 1.25,
+                                    color: const Color(0xFF2F2510),
+                                  ),
+                                )
+                              : _SelectableLineText(
+                                  rawLine.trim(),
+                                  style: theme.textTheme.titleMedium?.copyWith(
+                                    height: 1.7,
+                                    color: const Color(0xFF2F2510),
+                                  ),
+                                ),
+                        ),
+                      ],
+                    );
                     return Padding(
                       padding: const EdgeInsets.symmetric(vertical: 3),
                       child: Column(
@@ -1294,88 +1527,91 @@ class _PoemContentView extends StatelessWidget {
                               ),
                               child: _LineAnnotationPreview(
                                 lineNumber: currentLineNumber,
-                                notes: previewNotes,
-                                onClose: onDismissPreview,
+                                notes: widget.previewNotes,
+                                onClose: widget.onDismissPreview,
                               ),
                             ),
                           ],
                           Material(
                             color: Colors.transparent,
-                            child: InkWell(
-                              borderRadius: BorderRadius.circular(6),
-                              onLongPress: () =>
-                                  onLineLongPress(currentLineNumber),
-                              child: Padding(
-                                padding: const EdgeInsets.symmetric(
-                                  vertical: 2,
-                                ),
-                                child: Row(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    SizedBox(
-                                      width: 28,
-                                      child: InkWell(
-                                        borderRadius: BorderRadius.circular(6),
-                                        onTap: () => onLineNumberTap(
-                                          currentLineNumber,
+                            child: widget.showToneMarks
+                                ? InkWell(
+                                    borderRadius: BorderRadius.circular(6),
+                                    onTap: () =>
+                                        widget.onLineTap(currentLineNumber),
+                                    onLongPress: _showToneSelectionHint,
+                                    child: ToneMarkedLineIssueOverlay(
+                                      line: rawLine.trim(),
+                                      showLineNumbers: true,
+                                      marks: lineMarks,
+                                      relations: relationLabels,
+                                      lineTopPadding: 2,
+                                      child: Padding(
+                                        padding: const EdgeInsets.symmetric(
+                                          vertical: 2,
                                         ),
-                                        child: Padding(
-                                          padding: const EdgeInsets.symmetric(
-                                            vertical: 3,
-                                          ),
-                                          child: Text(
-                                            '$currentLineNumber',
-                                            style: theme.textTheme.labelSmall
-                                                ?.copyWith(
-                                              color: const Color(0xFF9A7B2F),
-                                              decoration:
-                                                  TextDecoration.underline,
-                                            ),
-                                          ),
-                                        ),
+                                        child: lineRow,
                                       ),
                                     ),
-                                    Expanded(
-                                      child: showToneMarks
-                                          ? ToneMarkedLineText(
-                                              line: rawLine.trim(),
-                                              rhymeBook:
-                                                  poem.prosodyRhymeBook,
-                                              lineNumber: currentLineNumber,
-                                              overridesJson:
-                                                  poem.prosodyOverridesJson,
-                                              textStyle: theme
-                                                  .textTheme.titleMedium
-                                                  ?.copyWith(
-                                                height: 1.25,
-                                                color:
-                                                    const Color(0xFF2F2510),
-                                              ),
-                                            )
-                                          : Text(
-                                              rawLine.trim(),
-                                              style: theme.textTheme.titleMedium
-                                                  ?.copyWith(
-                                                height: 1.7,
-                                                color:
-                                                    const Color(0xFF2F2510),
-                                              ),
-                                            ),
+                                  )
+                                : Padding(
+                                    padding: EdgeInsets.zero,
+                                    child: InkWell(
+                                      borderRadius: BorderRadius.circular(6),
+                                      onTap: () =>
+                                          widget.onLineTap(currentLineNumber),
+                                      child: Padding(
+                                        padding: const EdgeInsets.symmetric(
+                                          vertical: 2,
+                                        ),
+                                        child: lineRow,
+                                      ),
                                     ),
-                                  ],
-                                ),
-                              ),
-                            ),
+                                  ),
                           ),
-                        ],
-                      ),
-                    );
+                         ],
+                       ),
+                     );
                   },
                 ),
           ],
         ),
       ),
     );
+
+    if (widget.showToneMarks) {
+      return content;
+    }
+
+    return SelectionArea(
+      key: _selectionAreaKey,
+      contextMenuBuilder: _askAiRegionMenuBuilder(
+        () => _selectedText,
+        widget.onAskAi,
+      ),
+      onSelectionChanged: _handleSelectionChanged,
+      child: content,
+    );
+  }
+
+  void _showToneSelectionHint() {
+    ScaffoldMessenger.of(context)
+      ..hideCurrentSnackBar()
+      ..showSnackBar(
+        const SnackBar(content: Text('欲选择文本需关闭格律审查。')),
+      );
+  }
+}
+
+class _SelectableLineText extends StatelessWidget {
+  const _SelectableLineText(this.text, {this.style});
+
+  final String text;
+  final TextStyle? style;
+
+  @override
+  Widget build(BuildContext context) {
+    return Text(text, style: style);
   }
 }
 
@@ -1471,16 +1707,20 @@ class _LearningSection extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
     return Card(
       margin: const EdgeInsets.symmetric(vertical: 6),
-      child: ExpansionTile(
-        initiallyExpanded: initiallyExpanded,
-        shape: const RoundedRectangleBorder(side: BorderSide.none),
-        collapsedShape: const RoundedRectangleBorder(side: BorderSide.none),
-        leading: Icon(icon),
-        title: Text(title),
-        childrenPadding: const EdgeInsets.fromLTRB(16, 0, 16, 14),
-        children: [child],
+      child: Theme(
+        data: theme.copyWith(dividerColor: Colors.transparent),
+        child: ExpansionTile(
+          initiallyExpanded: initiallyExpanded,
+          shape: const RoundedRectangleBorder(side: BorderSide.none),
+          collapsedShape: const RoundedRectangleBorder(side: BorderSide.none),
+          leading: Icon(icon),
+          title: Text(title),
+          childrenPadding: const EdgeInsets.fromLTRB(16, 0, 16, 14),
+          children: [child],
+        ),
       ),
     );
   }
@@ -1529,111 +1769,139 @@ class _ControlledLearningSection extends StatelessWidget {
   }
 }
 
-class _LearningNoteSection extends StatelessWidget {
-  const _LearningNoteSection({required this.note, required this.onEdit});
+class _LearningNoteSection extends StatefulWidget {
+  const _LearningNoteSection({
+    required this.note,
+    required this.onChanged,
+    required this.onAskAi,
+  });
 
   final String note;
-  final VoidCallback onEdit;
+  final ValueChanged<String> onChanged;
+  final ValueChanged<String> onAskAi;
 
   @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final value = note.trim();
-
-    return Card(
-      margin: const EdgeInsets.symmetric(vertical: 6),
-      child: ExpansionTile(
-        initiallyExpanded: value.isNotEmpty,
-        shape: const RoundedRectangleBorder(side: BorderSide.none),
-        collapsedShape: const RoundedRectangleBorder(side: BorderSide.none),
-        leading: const Icon(Icons.edit_note_outlined),
-        title: const Text('学习笔记'),
-        childrenPadding: const EdgeInsets.fromLTRB(16, 0, 16, 14),
-        children: [
-          Align(
-            alignment: Alignment.centerLeft,
-            child: value.isEmpty
-                ? Text('暂无学习笔记。', style: theme.textTheme.bodyMedium)
-                : SelectableText(
-                    value,
-                    style: theme.textTheme.bodyMedium?.copyWith(height: 1.65),
-                  ),
-          ),
-          const SizedBox(height: 10),
-          Align(
-            alignment: Alignment.centerRight,
-            child: TextButton.icon(
-              onPressed: onEdit,
-              icon: const Icon(Icons.edit_outlined),
-              label: Text(value.isEmpty ? '添加笔记' : '编辑笔记'),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
+  State<_LearningNoteSection> createState() => _LearningNoteSectionState();
 }
 
-class _LearningNoteDialog extends StatefulWidget {
-  const _LearningNoteDialog({required this.initialNote});
-
-  final String initialNote;
-
-  @override
-  State<_LearningNoteDialog> createState() => _LearningNoteDialogState();
-}
-
-class _LearningNoteDialogState extends State<_LearningNoteDialog> {
+class _LearningNoteSectionState extends State<_LearningNoteSection> {
   late final TextEditingController _controller;
+  late final FocusNode _focusNode;
+  Timer? _saveTimer;
+  late String _lastSavedNote;
 
   @override
   void initState() {
     super.initState();
-    _controller = TextEditingController(text: widget.initialNote);
+    _lastSavedNote = widget.note.trim();
+    _controller = TextEditingController(text: _lastSavedNote);
+    _focusNode = FocusNode()..addListener(_handleFocusChanged);
+  }
+
+  @override
+  void didUpdateWidget(covariant _LearningNoteSection oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    final nextNote = widget.note.trim();
+    if (!_focusNode.hasFocus && nextNote != _lastSavedNote) {
+      _lastSavedNote = nextNote;
+      _controller.text = nextNote;
+    }
   }
 
   @override
   void dispose() {
+    _saveTimer?.cancel();
+    _saveNow();
+    _focusNode.removeListener(_handleFocusChanged);
+    _focusNode.dispose();
     _controller.dispose();
     super.dispose();
   }
 
+  void _handleFocusChanged() {
+    if (!_focusNode.hasFocus) {
+      _saveNow();
+    }
+  }
+
+  void _scheduleSave(String _) {
+    _saveTimer?.cancel();
+    _saveTimer = Timer(const Duration(milliseconds: 900), _saveNow);
+  }
+
+  void _saveNow() {
+    _saveTimer?.cancel();
+    _saveTimer = null;
+    final nextNote = _controller.text.trim();
+    if (nextNote == _lastSavedNote) {
+      return;
+    }
+    _lastSavedNote = nextNote;
+    widget.onChanged(nextNote);
+  }
+
   @override
   Widget build(BuildContext context) {
-    return AlertDialog(
-      title: const Text('编辑学习笔记'),
-      content: SizedBox(
-        width: double.maxFinite,
-        child: TextField(
-          controller: _controller,
-          minLines: 6,
-          maxLines: 12,
-          keyboardType: TextInputType.multiline,
-          decoration: const InputDecoration(
-            hintText: '记录个人理解、疑问、记忆方法或学习心得',
-            alignLabelWithHint: true,
-          ),
+    final theme = Theme.of(context);
+
+    return Card(
+      margin: const EdgeInsets.symmetric(vertical: 6),
+      child: Theme(
+        data: theme.copyWith(dividerColor: Colors.transparent),
+        child: ExpansionTile(
+          initiallyExpanded: true,
+          shape: const RoundedRectangleBorder(side: BorderSide.none),
+          collapsedShape: const RoundedRectangleBorder(side: BorderSide.none),
+          leading: const Icon(Icons.edit_note_outlined),
+          title: const Text('学习笔记'),
+          childrenPadding: const EdgeInsets.fromLTRB(16, 0, 16, 14),
+          children: [
+            TextField(
+              controller: _controller,
+              focusNode: _focusNode,
+              minLines: 3,
+              maxLines: null,
+              keyboardType: TextInputType.multiline,
+              textInputAction: TextInputAction.newline,
+              contextMenuBuilder: _askAiSelectionMenuBuilder(widget.onAskAi),
+              style: theme.textTheme.bodyMedium?.copyWith(height: 1.65),
+              decoration: InputDecoration(
+                hintText: '暂无笔记',
+                hintStyle: theme.textTheme.bodyMedium?.copyWith(
+                  color: const Color(0xFF9B9484),
+                ),
+                contentPadding: const EdgeInsets.all(12),
+                filled: true,
+                fillColor: Colors.white,
+                enabledBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(8),
+                  borderSide: const BorderSide(color: Color(0xFFEEDC9A)),
+                ),
+                focusedBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(8),
+                  borderSide: const BorderSide(color: Color(0xFFE0B02E)),
+                ),
+              ),
+              onChanged: _scheduleSave,
+              onEditingComplete: _saveNow,
+            ),
+          ],
         ),
       ),
-      actions: [
-        TextButton(
-          onPressed: () => Navigator.pop(context),
-          child: const Text('取消'),
-        ),
-        FilledButton(
-          onPressed: () => Navigator.pop(context, _controller.text),
-          child: const Text('保存'),
-        ),
-      ],
     );
   }
 }
 
 class _SelectableBlock extends StatelessWidget {
-  const _SelectableBlock({required this.text, required this.emptyText});
+  const _SelectableBlock({
+    required this.text,
+    required this.emptyText,
+    required this.onAskAi,
+  });
 
   final String text;
   final String emptyText;
+  final ValueChanged<String> onAskAi;
 
   @override
   Widget build(BuildContext context) {
@@ -1647,6 +1915,7 @@ class _SelectableBlock extends StatelessWidget {
       alignment: Alignment.centerLeft,
       child: SelectableText(
         value,
+        contextMenuBuilder: _askAiSelectionMenuBuilder(onAskAi),
         style: theme.textTheme.bodyMedium?.copyWith(height: 1.65),
       ),
     );
@@ -1710,11 +1979,13 @@ class _AnnotationView extends StatelessWidget {
     required this.annotation,
     required this.lineKeys,
     required this.highlightedLine,
+    required this.onAskAi,
   });
 
   final _ParsedAnnotation annotation;
   final Map<int, GlobalKey> lineKeys;
   final int? highlightedLine;
+  final ValueChanged<String> onAskAi;
 
   @override
   Widget build(BuildContext context) {
@@ -1758,6 +2029,7 @@ class _AnnotationView extends StatelessWidget {
                 const SizedBox(height: 4),
                 SelectableText(
                   annotation.grouped[key]!.join('\n'),
+                  contextMenuBuilder: _askAiSelectionMenuBuilder(onAskAi),
                   style: theme.textTheme.bodyMedium?.copyWith(height: 1.55),
                 ),
               ],
@@ -1768,6 +2040,7 @@ class _AnnotationView extends StatelessWidget {
           const SizedBox(height: 4),
           SelectableText(
             annotation.unmatched.join('\n'),
+            contextMenuBuilder: _askAiSelectionMenuBuilder(onAskAi),
             style: theme.textTheme.bodyMedium?.copyWith(height: 1.55),
           ),
         ],

@@ -7,6 +7,7 @@ import '../models/poem_collection.dart';
 import '../services/openai_api_service.dart';
 import '../services/poem_agent_service.dart';
 import '../services/poem_text_format_service.dart';
+import '../services/prosody_ai_service.dart';
 import '../services/prosody_service.dart';
 import '../services/web_search_service.dart';
 
@@ -15,10 +16,12 @@ class PoemAgentChatScreen extends StatefulWidget {
     super.key,
     this.currentCollection,
     this.focusPoem,
+    this.initialInput,
   });
 
   final PoemCollection? currentCollection;
   final Poem? focusPoem;
+  final String? initialInput;
 
   @override
   State<PoemAgentChatScreen> createState() => _PoemAgentChatScreenState();
@@ -54,6 +57,13 @@ class _PoemAgentChatScreenState extends State<PoemAgentChatScreen> {
   void initState() {
     super.initState();
     _focusPoem = widget.focusPoem;
+    final initialInput = widget.initialInput?.trim();
+    if (initialInput != null && initialInput.isNotEmpty) {
+      _inputController.text = initialInput;
+      _inputController.selection = TextSelection.collapsed(
+        offset: initialInput.length,
+      );
+    }
     _loadContext();
   }
 
@@ -392,7 +402,7 @@ class _PoemAgentChatScreenState extends State<PoemAgentChatScreen> {
       return;
     }
 
-    await AppDatabase.instance.createPoem(
+    final poemId = await AppDatabase.instance.createPoem(
       collectionId: collectionId,
       title: draft.title,
       author: draft.author,
@@ -405,6 +415,8 @@ class _PoemAgentChatScreenState extends State<PoemAgentChatScreen> {
       learningNote: draft.learningNote,
       appreciation: draft.appreciation,
     );
+    final prosodyCalibrationMessage =
+        await _autoCalibrateProsody(poemId, collectionId);
 
     _changed = true;
     final collectionName = _collections
@@ -416,9 +428,12 @@ class _PoemAgentChatScreenState extends State<PoemAgentChatScreen> {
         ? '已将《${draft.title}》添加到“$collectionName”。'
         : '${result.message}\n\n已将《${draft.title}》添加到“$collectionName”。';
     final warning = _annotationWarningForTitle(draft.title, annotationCheck);
-    final displayMessage = warning == null
+    var displayMessage = warning == null
         ? message
         : '$message\n\n$warning\n可以稍后让我“重新整理《${draft.title}》的注释”。';
+    if (prosodyCalibrationMessage != null) {
+      displayMessage = '$displayMessage\n\n$prosodyCalibrationMessage';
+    }
     _addAssistantMessage(
       _messageWithSources(displayMessage, result.searchSources),
     );
@@ -483,10 +498,11 @@ class _PoemAgentChatScreenState extends State<PoemAgentChatScreen> {
       }
     }
 
+    final prosodyCalibrationMessages = <String>[];
     for (var index = 0; index < drafts.length; index += 1) {
       final draft = drafts[index];
       final annotationCheck = annotationChecks[index];
-      await AppDatabase.instance.createPoem(
+      final poemId = await AppDatabase.instance.createPoem(
         collectionId: collectionId,
         title: draft.title,
         author: draft.author,
@@ -499,6 +515,11 @@ class _PoemAgentChatScreenState extends State<PoemAgentChatScreen> {
         learningNote: draft.learningNote,
         appreciation: draft.appreciation,
       );
+      final calibrationMessage =
+          await _autoCalibrateProsody(poemId, collectionId);
+      if (calibrationMessage != null) {
+        prosodyCalibrationMessages.add('《${draft.title}》：$calibrationMessage');
+      }
     }
 
     _changed = true;
@@ -524,9 +545,49 @@ class _PoemAgentChatScreenState extends State<PoemAgentChatScreen> {
     final displayMessage = warnings.isEmpty
         ? message
         : '$message\n\n注释处理：\n${warnings.join('\n')}';
+    final calibratedDisplayMessage = prosodyCalibrationMessages.isEmpty
+        ? displayMessage
+        : '$displayMessage\n\n格律处理：\n${prosodyCalibrationMessages.join('\n')}';
     _addAssistantMessage(
-      _messageWithSources(displayMessage, result.searchSources),
+      _messageWithSources(calibratedDisplayMessage, result.searchSources),
     );
+  }
+
+  Future<String?> _autoCalibrateProsody(int poemId, int collectionId) async {
+    final config = _apiConfig;
+    if (config == null) {
+      return null;
+    }
+    try {
+      final database = AppDatabase.instance;
+      final poem = await database.getPoemById(
+        poemId,
+        collectionId: collectionId,
+      );
+      if (poem == null ||
+          !poem.prosodySupported ||
+          !poem.prosodyEnabled ||
+          poem.prosodySystem != Poem.prosodySystemRegulatedVerse) {
+        return null;
+      }
+      final overridesJson = await const ProsodyAiService().calibrate(
+        config: config,
+        poem: poem,
+      );
+      if (overridesJson.trim() == poem.prosodyOverridesJson.trim()) {
+        return null;
+      }
+      await database.updatePoem(
+        poem.copyWith(
+          prosodyOverridesJson: overridesJson,
+          prosodyVerifiedAt: DateTime.now(),
+          prosodyVerifiedBy: 'agent',
+        ),
+      );
+      return '已自动校准平仄未定字。';
+    } catch (error) {
+      return '格律智能校准暂未完成：$error';
+    }
   }
 
   Future<void> _updatePoemFromAgent(PoemAgentResult result) async {
@@ -615,6 +676,15 @@ class _PoemAgentChatScreenState extends State<PoemAgentChatScreen> {
 
     await AppDatabase.instance.updatePoem(updatedPoem);
 
+    String? prosodyCalibrationMessage;
+    if (_shouldRefreshProsody(updates) ||
+        updates.values.containsKey('prosody_overrides_json')) {
+      prosodyCalibrationMessage = await _autoCalibrateProsody(
+        updatedPoem.id!,
+        updatedPoem.collectionId,
+      );
+    }
+
     _changed = true;
     await _reloadPoemContext();
 
@@ -623,7 +693,12 @@ class _PoemAgentChatScreenState extends State<PoemAgentChatScreen> {
     final message = result.message.trim().isEmpty
         ? '已更新《${updatedPoem.title}》$suffix。'
         : '${result.message}\n\n已更新《${updatedPoem.title}》$suffix。';
-    _addAssistantMessage(_messageWithSources(message, result.searchSources));
+    final displayMessage = prosodyCalibrationMessage == null
+        ? message
+        : '$message\n\n$prosodyCalibrationMessage';
+    _addAssistantMessage(
+      _messageWithSources(displayMessage, result.searchSources),
+    );
   }
 
   PoemAgentDraft _normalizeDraftContent(PoemAgentDraft draft) {
@@ -911,10 +986,24 @@ class _PoemAgentChatScreenState extends State<PoemAgentChatScreen> {
             onPressed: _close,
             icon: const Icon(Icons.arrow_back),
           ),
-          title: Text(
-            _screenTitle,
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
+          title: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(
+                _screenTitle,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              ),
+              if ((_apiConfig?.chatModel.trim() ?? '').isNotEmpty)
+                Text(
+                  _apiConfig!.chatModel.trim(),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                        color: const Color(0xFF4F3B12),
+                      ),
+                ),
+            ],
           ),
           actions: [
             IconButton(

@@ -2,7 +2,9 @@
 *.class
 *.log
 *.pyc
+*.pyc.*
 *.swp
+__pycache__/
 .DS_Store
 .atom/
 .build/
@@ -32,6 +34,11 @@ migrate_working_dir/
 .pub/
 /build/
 /coverage/
+
+# Local Python tool packaging
+tools/build/
+tools/dist/
+tools/*.spec
 
 # Symbolication related
 app.*.symbols

@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../models/poem.dart';
 import '../services/prosody_service.dart';
 import '../services/rhyme_service.dart';
+import '../services/regulated_verse_checker.dart';
 
 class ProsodyPanel extends StatelessWidget {
   const ProsodyPanel({
@@ -34,109 +35,145 @@ class ProsodyPanel extends StatelessWidget {
     final note = poem.prosodyNote.trim();
     final verificationLabel = _verificationLabel(poem);
     final rhymeAnalysis = analyzeRhyme(poem);
+    final regulatedCheck = checkRegulatedVerse(poem);
+    final isRegulatedVerse =
+        poem.prosodySystem == Poem.prosodySystemRegulatedVerse;
+    final displayForm = regulatedCheck.applicable
+        ? regulatedCheck.displayForm
+        : form;
 
     return Card(
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(16, 14, 16, 14),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
+      margin: const EdgeInsets.symmetric(vertical: 6),
+      child: Theme(
+        data: theme.copyWith(dividerColor: Colors.transparent),
+        child: ExpansionTile(
+          initiallyExpanded: true,
+          shape: const RoundedRectangleBorder(side: BorderSide.none),
+          collapsedShape: const RoundedRectangleBorder(side: BorderSide.none),
+          tilePadding: const EdgeInsets.fromLTRB(16, 4, 12, 4),
+          childrenPadding: const EdgeInsets.fromLTRB(16, 0, 16, 14),
+          leading: const Icon(
+            Icons.fact_check_outlined,
+            color: Color(0xFF8A6900),
+          ),
+          title: Text('格律', style: theme.textTheme.titleMedium),
           children: [
-            Row(
-              children: [
-                const Icon(
-                  Icons.fact_check_outlined,
-                  color: Color(0xFF8A6900),
-                ),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: Text('格律', style: theme.textTheme.titleMedium),
-                ),
-              ],
-            ),
-            const SizedBox(height: 12),
-            Wrap(
-              spacing: 8,
-              runSpacing: 8,
-              children: [
-                _ProsodyChip(
-                  label: prosodySystemLabel(poem.prosodySystem),
-                  icon: Icons.category_outlined,
-                ),
-                if (form.isNotEmpty)
-                  _ProsodyChip(label: form, icon: Icons.format_list_numbered),
-                if (rhymeBook.isNotEmpty)
-                  _ProsodyChip(label: rhymeBook, icon: Icons.library_books),
-                if (rhymeAnalysis.primaryRhyme.isNotEmpty)
-                  _ProsodyChip(
-                    label: '韵部：${rhymeAnalysis.primaryRhyme}',
-                    icon: rhymeAnalysis.needsConfirmation
-                        ? Icons.help_outline
-                        : Icons.check_circle_outline,
-                  ),
-                if (verificationLabel.isNotEmpty)
-                  _ProsodyChip(
-                    label: verificationLabel,
-                    icon: Icons.verified_outlined,
-                  ),
-              ],
-            ),
-            const SizedBox(height: 12),
-            Text(
-              rhymeAnalysis.applicable
-                  ? rhymeAnalysis.summary
-                  : _statusText(poem),
-              style: theme.textTheme.bodyMedium?.copyWith(
-                height: 1.55,
-                color: const Color(0xFF4F3B12),
-              ),
-            ),
-            if (rhymeAnalysis.details.isNotEmpty) ...[
-              const SizedBox(height: 8),
-              _ProsodyDetailList(details: rhymeAnalysis.details),
-            ],
-            if (note.isNotEmpty) ...[
-              const SizedBox(height: 8),
-              Text(
-                note,
-                style: theme.textTheme.bodySmall?.copyWith(height: 1.5),
-              ),
-            ],
-            const SizedBox(height: 8),
-            SwitchListTile(
-              contentPadding: EdgeInsets.zero,
-              dense: true,
-              value: showToneDetails,
-              onChanged: onToneDetailsChanged,
-              title: const Text('逐字平仄'),
-              subtitle: const Text('打开后显示每一句每个字的平仄初判。'),
-            ),
-            if (onManualCalibration != null || onAiCalibration != null) ...[
-              const SizedBox(height: 4),
-              Wrap(
-                spacing: 8,
-                runSpacing: 8,
+            Align(
+              alignment: Alignment.centerLeft,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  if (onManualCalibration != null)
-                    OutlinedButton.icon(
-                      onPressed:
-                          calibrationBusy ? null : onManualCalibration,
-                      icon: const Icon(Icons.tune_outlined),
-                      label: const Text('人工校准'),
+                  SwitchListTile(
+                    contentPadding: EdgeInsets.zero,
+                    dense: true,
+                    value: showToneDetails,
+                    onChanged: onToneDetailsChanged,
+                    title: Text(isRegulatedVerse ? '格律审查' : '逐字平仄'),
+                    subtitle: Text(
+                      isRegulatedVerse
+                          ? '打开后在正文中显示逐字平仄；平仄全部确定后自动进行正格审查。'
+                          : '打开后显示每一句每个字的平仄初判。',
                     ),
-                  if (onAiCalibration != null)
-                    FilledButton.tonalIcon(
-                      onPressed: calibrationBusy ? null : onAiCalibration,
-                      icon: calibrationBusy
-                          ? const SizedBox.square(
-                              dimension: 16,
-                              child: CircularProgressIndicator(strokeWidth: 2),
-                            )
-                          : const Icon(Icons.auto_fix_high_outlined),
-                      label: const Text('智能校准'),
+                  ),
+                  const SizedBox(height: 8),
+                  Wrap(
+                    spacing: 8,
+                    runSpacing: 8,
+                    children: [
+                      _ProsodyChip(
+                        label: prosodySystemLabel(poem.prosodySystem),
+                        icon: Icons.category_outlined,
+                      ),
+                      if (displayForm.isNotEmpty)
+                        _ProsodyChip(
+                          label: displayForm,
+                          icon:
+                              regulatedCheck.applicable && !regulatedCheck.ok
+                                  ? Icons.report_problem_outlined
+                                  : Icons.format_list_numbered,
+                          color: regulatedCheck.applicable &&
+                                  !regulatedCheck.unresolved
+                              ? (regulatedCheck.ok
+                                  ? const Color(0xFFE9F7EA)
+                                  : const Color(0xFFFFE9E4))
+                              : null,
+                        ),
+                      if (rhymeBook.isNotEmpty)
+                        _ProsodyChip(
+                          label: rhymeBook,
+                          icon: Icons.library_books,
+                        ),
+                      if (rhymeAnalysis.primaryRhyme.isNotEmpty)
+                        _ProsodyChip(
+                          label: '韵部：${rhymeAnalysis.primaryRhyme}',
+                          icon: rhymeAnalysis.needsConfirmation
+                              ? Icons.help_outline
+                              : Icons.check_circle_outline,
+                        ),
+                      if (verificationLabel.isNotEmpty)
+                        _ProsodyChip(
+                          label: verificationLabel,
+                          icon: Icons.verified_outlined,
+                        ),
+                    ],
+                  ),
+                  const SizedBox(height: 12),
+                  Text(
+                    _summaryText(
+                      poem: poem,
+                      rhymeAnalysis: rhymeAnalysis,
+                      regulatedCheck: regulatedCheck,
                     ),
+                    style: theme.textTheme.bodyMedium?.copyWith(
+                      height: 1.55,
+                      color: const Color(0xFF4F3B12),
+                    ),
+                  ),
+                  if (rhymeAnalysis.details.isNotEmpty) ...[
+                    const SizedBox(height: 8),
+                    _ProsodyDetailList(details: rhymeAnalysis.details),
+                  ],
+                  if (note.isNotEmpty) ...[
+                    const SizedBox(height: 8),
+                    Text(
+                      note,
+                      style: theme.textTheme.bodySmall?.copyWith(height: 1.5),
+                    ),
+                  ],
+                  if (onManualCalibration != null ||
+                      onAiCalibration != null) ...[
+                    const SizedBox(height: 10),
+                    Wrap(
+                      spacing: 8,
+                      runSpacing: 8,
+                      children: [
+                        if (onManualCalibration != null)
+                          OutlinedButton.icon(
+                            onPressed:
+                                calibrationBusy ? null : onManualCalibration,
+                            icon: const Icon(Icons.tune_outlined),
+                            label: const Text('人工校准'),
+                          ),
+                        if (onAiCalibration != null)
+                          FilledButton.tonalIcon(
+                            onPressed:
+                                calibrationBusy ? null : onAiCalibration,
+                            icon: calibrationBusy
+                                ? const SizedBox.square(
+                                    dimension: 16,
+                                    child: CircularProgressIndicator(
+                                      strokeWidth: 2,
+                                    ),
+                                  )
+                                : const Icon(Icons.auto_fix_high_outlined),
+                            label: const Text('智能校准'),
+                          ),
+                      ],
+                    ),
+                  ],
                 ],
               ),
-            ],
+            ),
           ],
         ),
       ),
@@ -154,6 +191,20 @@ class ProsodyPanel extends StatelessWidget {
       default:
         return '当前作品暂未启用详细格律检查。';
     }
+  }
+
+  String _summaryText({
+    required Poem poem,
+    required RhymeAnalysis rhymeAnalysis,
+    required RegulatedVerseCheck regulatedCheck,
+  }) {
+    if (regulatedCheck.applicable) {
+      return regulatedCheck.summary;
+    }
+    if (rhymeAnalysis.applicable) {
+      return rhymeAnalysis.summary;
+    }
+    return _statusText(poem);
   }
 
   String _verificationLabel(Poem poem) {
@@ -198,19 +249,50 @@ class _ProsodyDetailList extends StatelessWidget {
 }
 
 class _ProsodyChip extends StatelessWidget {
-  const _ProsodyChip({required this.label, required this.icon});
+  const _ProsodyChip({required this.label, required this.icon, this.color});
 
   final String label;
   final IconData icon;
+  final Color? color;
 
   @override
   Widget build(BuildContext context) {
-    return Chip(
-      avatar: Icon(icon, size: 16),
-      label: Text(label),
-      backgroundColor: const Color(0xFFFFF4C7),
-      side: const BorderSide(color: Color(0xFFE6C66A)),
-      materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+    final available = MediaQuery.sizeOf(context).width - 132;
+    final maxWidth = available < 180.0
+        ? 180.0
+        : available > 360.0
+            ? 360.0
+            : available;
+    return ConstrainedBox(
+      constraints: BoxConstraints(maxWidth: maxWidth),
+      child: DecoratedBox(
+        decoration: BoxDecoration(
+          color: color ?? const Color(0xFFFFF4C7),
+          borderRadius: BorderRadius.circular(8),
+          border: Border.all(color: const Color(0xFFE6C66A)),
+        ),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Icon(icon, size: 16, color: const Color(0xFF8A6900)),
+              const SizedBox(width: 8),
+              Flexible(
+                child: Text(
+                  label,
+                  softWrap: true,
+                  style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                        color: const Color(0xFF4F3B12),
+                        height: 1.25,
+                      ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
     );
   }
 }

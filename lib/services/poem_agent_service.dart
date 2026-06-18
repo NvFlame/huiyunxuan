@@ -5,6 +5,7 @@ import '../models/poem.dart';
 import '../models/poem_collection.dart';
 import 'openai_api_service.dart';
 import 'prosody_service.dart';
+import 'regulated_verse_checker.dart';
 import 'rhyme_service.dart';
 import 'web_search_service.dart';
 
@@ -169,7 +170,7 @@ class PoemAgentService {
         : '当前位于诗词库“${currentCollection.name}”（id=${currentCollection.id}）内部。添加诗词默认归入当前库；修改诗词只允许使用当前库清单中列出的 poem_id。';
     final focusContext = focusPoem == null
         ? ''
-        : '当前学习模式聚焦诗词：poem_id=${focusPoem.id}，《${focusPoem.title}》，${focusPoem.dynasty}，${focusPoem.author}。用户说“这首诗”“当前诗”“这句”时，默认指这首诗；涉及修改时应优先使用这个 poem_id。若用户要求补充或更正译文、注释、学习笔记、赏析，且可确定内容，应直接返回 update_poem 写回诗词库；若用户说的内容与它明显不符，必须追问确认。';
+        : '当前学文或展才聚焦诗词：poem_id=${focusPoem.id}，《${focusPoem.title}》，${focusPoem.dynasty}，${focusPoem.author}。用户说“这首诗”“当前诗”“这句”时，默认指这首诗；涉及修改时应优先使用这个 poem_id。若用户要求补充或更正译文、注释、学习笔记、赏析，且可确定内容，应直接返回 update_poem 写回诗词库；若用户说的内容与它明显不符，必须追问确认。';
     final hasSearchResults = searchResults.isNotEmpty;
     final searchState = !hasSearchResults
         ? searchAvailable
@@ -199,7 +200,7 @@ $collectionLines
 当前可编辑诗词清单（更新诗词时只能使用这里列出的 poem_id）：
 $poemLines
 
-当前聚焦诗词完整内容（学习模式或训练模式中用于回答与修改）：
+当前聚焦诗词完整内容（学文或展才中用于回答与修改）：
 $focusPoemBlock
 $searchBlock
 
@@ -410,6 +411,9 @@ ${_emptyAsNone(poem.prosodyOverridesJson)}
 
 prosody_candidates:
 ${_buildProsodyCandidateBlock(poem)}
+
+prosody_tones:
+${_buildProsodyToneBlock(poem)}
 ''';
   }
 
@@ -433,6 +437,7 @@ ${_buildProsodyCandidateBlock(poem)}
       return '';
     }
     final candidates = findProsodyCalibrationCandidates(poem);
+    final regulatedCheck = checkRegulatedVerse(poem);
     final candidateText = candidates.isEmpty
         ? '暂无候选'
         : candidates
@@ -449,8 +454,47 @@ ${_buildProsodyCandidateBlock(poem)}
       if (poem.prosodyForm.trim().isNotEmpty) poem.prosodyForm.trim(),
       if (poem.prosodyRhymeBook.trim().isNotEmpty)
         poem.prosodyRhymeBook.trim(),
+      if (regulatedCheck.applicable) regulatedCheck.summary,
       '候选：$candidateText',
     ].join('，');
+  }
+
+  String _buildProsodyToneBlock(Poem poem) {
+    if (!poem.prosodySupported || !poem.prosodyEnabled) {
+      return '（未启用格律显示）';
+    }
+    final toneLines = analyzeCharacterTones(poem);
+    final regulatedCheck = checkRegulatedVerse(poem);
+    final toneText = toneLines.isEmpty
+        ? '（暂无逐字平仄）'
+        : toneLines.map((line) {
+            final marks = line.characters
+                .map((character) => '${character.character}${character.mark}')
+                .join(' ');
+            return '- line=${line.lineNumber}: $marks';
+          }).join('\n');
+    final lineChecks = regulatedCheck.lines.isEmpty
+        ? '（暂无逐句审查）'
+        : regulatedCheck.lines.map((line) {
+            return '- line=${line.lineNumber}, pattern=${line.pattern}, '
+                'tags=${line.tags.join('、')}';
+          }).join('\n');
+    final relations = regulatedCheck.relations.isEmpty
+        ? '（无失粘失对关系）'
+        : regulatedCheck.relations.map((relation) {
+            return '- lines=${relation.firstLine}-${relation.secondLine}, '
+                'tag=${relation.tag}';
+          }).join('\n');
+    return '''
+check: ${regulatedCheck.summary}
+display_form: ${regulatedCheck.displayForm}
+tones:
+$toneText
+line_checks:
+$lineChecks
+relations:
+$relations
+''';
   }
 
   String _buildSearchResultsBlock(List<WebSearchResult> results) {

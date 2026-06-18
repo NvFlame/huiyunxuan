@@ -104,16 +104,65 @@ $candidateLines
       if (override == null) {
         continue;
       }
-      final candidate = candidatesByKey[override.key];
-      if (candidate == null || candidate.character != override.character) {
+      final candidate = candidatesByKey[override.key] ??
+          _findCandidateByLineAndCharacter(
+            candidates,
+            lineNumber: override.lineNumber,
+            character: override.character,
+          );
+      if (candidate == null) {
         continue;
       }
-      overrides.add(override);
+      overrides.add(
+        ProsodyCharacterOverride(
+          lineNumber: candidate.lineNumber,
+          charIndex: candidate.charIndex,
+          character: candidate.character,
+          tone: _resolvedTone(override, candidate),
+          rhyme: override.rhyme,
+          note: override.note,
+        ),
+      );
     }
     if (overrides.isEmpty) {
       throw const FormatException('模型没有返回可用的校准项。');
     }
     return overrides;
+  }
+
+  ProsodyCalibrationCandidate? _findCandidateByLineAndCharacter(
+    List<ProsodyCalibrationCandidate> candidates, {
+    required int lineNumber,
+    required String character,
+  }) {
+    final matches = candidates.where((candidate) {
+      return candidate.lineNumber == lineNumber &&
+          candidate.character == character;
+    }).toList(growable: false);
+    return matches.length == 1 ? matches.first : null;
+  }
+
+  String _resolvedTone(
+    ProsodyCharacterOverride override,
+    ProsodyCalibrationCandidate candidate,
+  ) {
+    final tone = override.tone.trim();
+    if (tone == '平' || tone == '仄') {
+      return tone;
+    }
+    final rhyme = override.rhyme.trim();
+    if (rhyme.isNotEmpty) {
+      for (final match in candidate.matches) {
+        if (match.label == rhyme) {
+          return match.tone == RhymeTone.level ? '平' : '仄';
+        }
+      }
+    }
+    final tones = candidate.matches.map((entry) => entry.tone).toSet();
+    if (tones.length == 1) {
+      return tones.first == RhymeTone.level ? '平' : '仄';
+    }
+    return tone;
   }
 
   String? _extractJson(String text) {
@@ -145,10 +194,12 @@ const _systemPrompt = '''
 重要原则：
 1. 不能为了让韵脚统一而强行改变读音；必须先按字义和语法判断读音。
 2. 如果候选字在该处语义明确，应给出 tone 和 rhyme；如果仍不能确定，tone 写“多”，rhyme 留空。
-3. tone 只能写“平”“仄”“多”之一。
-4. rhyme 使用候选韵部中的原文标签，例如“上声二十二养”“去声二十三漾”“十一尤”等；无法确定则留空。
-5. 如果同一首诗的韵脚实际分属多个韵部，应按每个字自身读音分别填写，不要强行统一。
-6. 例如“复照青苔上”中的“上”是方位词，应按“上面”的去声义处理，而不是为了押韵强行读上声。
+3. 本任务用于启动后续格律审查，请尽量逐项判定；除非完全无法按语境判断，否则 tone 必须写“平”或“仄”。
+4. tone 只能写“平”“仄”“多”之一。
+5. rhyme 使用候选韵部中的原文标签，例如“上声二十二养”“去声二十三漾”“十一尤”等；无法确定则留空。
+6. 如果同一首诗的韵脚实际分属多个韵部，应按每个字自身读音分别填写，不要强行统一。
+7. 例如“复照青苔上”中的“上”是方位词，应按“上面”的去声义处理，而不是为了押韵强行读上声。
+8. 必须覆盖候选字列表中的所有项目，不要只返回其中一部分。
 
 只返回 JSON，不要 Markdown，不要解释 JSON 之外的文字。
 格式：

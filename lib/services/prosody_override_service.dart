@@ -16,10 +16,29 @@ class ProsodyOverrideStore {
     required String character,
   }) {
     final override = characters[positionKey(lineNumber, charIndex)];
-    if (override == null || override.character != character) {
-      return null;
+    if (override != null && override.character == character) {
+      return override;
     }
-    return override;
+    return byLineCharacter(lineNumber: lineNumber, character: character);
+  }
+
+  ProsodyCharacterOverride? byLineCharacter({
+    required int lineNumber,
+    required String character,
+  }) {
+    final matches = characters.values.where((override) {
+      return override.lineNumber == lineNumber && override.character == character;
+    }).toList(growable: false);
+    if (matches.length == 1) {
+      return matches.first;
+    }
+    final rhymeMatches = matches
+        .where((override) => override.rhyme.trim().isNotEmpty)
+        .toList(growable: false);
+    if (rhymeMatches.length == 1) {
+      return rhymeMatches.first;
+    }
+    return null;
   }
 
   ProsodyCharacterOverride? rhymeForLine({

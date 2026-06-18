@@ -197,6 +197,10 @@ RhymeAnalysis _analyzeRegulatedVerse(Poem poem) {
     if (character == null) {
       continue;
     }
+    final override = overrides.byLineCharacter(
+      lineNumber: lineNumber,
+      character: character,
+    );
     feet.add(
       RhymeFoot(
         lineNumber: lineNumber,
@@ -207,7 +211,8 @@ RhymeAnalysis _analyzeRegulatedVerse(Poem poem) {
           rhymeBook: poem.prosodyRhymeBook,
           overrides: overrides,
         ),
-        pronunciationUncertain: _needsPronunciationConfirmation(character),
+        pronunciationUncertain: _needsPronunciationConfirmation(character) &&
+            !_hasResolvedPronunciation(override),
       ),
     );
   }
@@ -235,7 +240,6 @@ RhymeAnalysis _analyzeRegulatedVerse(Poem poem) {
       '韵部不一：当前韵脚分属“${rhymeLabels.join('、')}”。此处只作提示，不判定为错误。',
     );
   }
-  details.add('依据：近体诗默认检查第 ${requiredLineNumbers.join('、')} 句韵脚，首句入韵会在后续模板阶段补充。');
 
   final needsConfirmation =
       primaryRhyme.isEmpty ||
@@ -259,18 +263,25 @@ RhymeAnalysis _analyzeCi(Poem poem) {
   final overrides = ProsodyOverrideStore.parse(poem.prosodyOverridesJson);
   final feet = _sentenceEndingCharacters(poem.content)
       .map(
-        (foot) => RhymeFoot(
-          lineNumber: foot.lineNumber,
-          character: foot.character,
-          matches: _lookupRhymeForFoot(
+        (foot) {
+          final override = overrides.byLineCharacter(
             lineNumber: foot.lineNumber,
             character: foot.character,
-            rhymeBook: poem.prosodyRhymeBook,
-            overrides: overrides,
-          ),
-          pronunciationUncertain:
-              _needsPronunciationConfirmation(foot.character),
-        ),
+          );
+          return RhymeFoot(
+            lineNumber: foot.lineNumber,
+            character: foot.character,
+            matches: _lookupRhymeForFoot(
+              lineNumber: foot.lineNumber,
+              character: foot.character,
+              rhymeBook: poem.prosodyRhymeBook,
+              overrides: overrides,
+            ),
+            pronunciationUncertain:
+                _needsPronunciationConfirmation(foot.character) &&
+                    !_hasResolvedPronunciation(override),
+          );
+        },
       )
       .toList(growable: false);
 
@@ -345,6 +356,7 @@ List<ProsodyCalibrationCandidate> findProsodyCalibrationCandidates(Poem poem) {
         character: character,
       );
       final needsTone = mark == '多' ||
+          mark == '?' ||
           _needsPronunciationConfirmation(character) ||
           (existing?.tone.trim().isNotEmpty ?? false);
       final needsRhyme = isRhymeFoot &&
@@ -445,14 +457,62 @@ List<RhymeEntry> _lookupRhymeForFoot({
     character: character,
   );
   if (override != null && override.rhyme.trim().isNotEmpty) {
+    final overrideTone = _toneForOverrideRhyme(
+      override,
+      character: character,
+      rhymeBook: rhymeBook,
+    );
     return [
       RhymeEntry(
         override.rhyme.trim(),
-        override.tone.trim() == '平' ? RhymeTone.level : RhymeTone.oblique,
+        overrideTone,
       ),
     ];
   }
-  return _lookupRhyme(character, rhymeBook);
+  final matches = _lookupRhyme(character, rhymeBook);
+  final toneOverride = overrides.byLineCharacter(
+    lineNumber: lineNumber,
+    character: character,
+  );
+  final tone = toneOverride?.tone.trim() ?? '';
+  if (tone == '平' || tone == '仄') {
+    final expectedTone = tone == '平' ? RhymeTone.level : RhymeTone.oblique;
+    final filtered = matches
+        .where((entry) => entry.tone == expectedTone)
+        .toList(growable: false);
+    if (filtered.isNotEmpty) {
+      return filtered;
+    }
+  }
+  return matches;
+}
+
+bool _hasResolvedPronunciation(ProsodyCharacterOverride? override) {
+  final tone = override?.tone.trim() ?? '';
+  return tone == '平' ||
+      tone == '仄' ||
+      (override?.rhyme.trim().isNotEmpty ?? false);
+}
+
+RhymeTone _toneForOverrideRhyme(
+  ProsodyCharacterOverride override, {
+  required String character,
+  required String rhymeBook,
+}) {
+  final tone = override.tone.trim();
+  if (tone == '平') {
+    return RhymeTone.level;
+  }
+  if (tone == '仄') {
+    return RhymeTone.oblique;
+  }
+  final rhyme = override.rhyme.trim();
+  for (final match in _lookupRhyme(character, rhymeBook)) {
+    if (match.label == rhyme) {
+      return match.tone;
+    }
+  }
+  return RhymeTone.oblique;
 }
 
 String _toneMarkForCharacter(String character, String rhymeBook) {
@@ -478,7 +538,11 @@ List<ToneCharacter> _analyzeLineToneCharacters({
       charIndex: charIndex,
       character: character,
     );
-    final overrideTone = override?.tone.trim() ?? '';
+    final overrideTone = _resolvedOverrideTone(
+      override,
+      character: character,
+      rhymeBook: rhymeBook,
+    );
     tones.add(
       ToneCharacter(
         character: character,
@@ -489,6 +553,32 @@ List<ToneCharacter> _analyzeLineToneCharacters({
     );
   }
   return tones;
+}
+
+String _resolvedOverrideTone(
+  ProsodyCharacterOverride? override, {
+  required String character,
+  required String rhymeBook,
+}) {
+  final tone = override?.tone.trim() ?? '';
+  if (tone == '平' || tone == '仄') {
+    return tone;
+  }
+  final rhyme = override?.rhyme.trim() ?? '';
+  if (rhyme.isNotEmpty) {
+    for (final match in _lookupRhyme(character, rhymeBook)) {
+      if (match.label == rhyme) {
+        return match.tone == RhymeTone.level ? '平' : '仄';
+      }
+    }
+  }
+  if (tone == '多' || tone == '?') {
+    final fallback = _toneMarkForCharacter(character, rhymeBook);
+    if (fallback == '平' || fallback == '仄') {
+      return fallback;
+    }
+  }
+  return tone;
 }
 
 String _toneMarkFromMatches(List<RhymeEntry> matches) {

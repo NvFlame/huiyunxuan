@@ -42,12 +42,12 @@ class _HomeScreenState extends State<HomeScreen> {
           children: [
             _JinshiPointCard(points: _jinshiPoints),
             _HomeSection(
-              title: '学习模式',
+              title: '学文',
               icon: Icons.menu_book_outlined,
               destination: const LearningModeScreen(),
             ),
             _HomeSection(
-              title: '训练模式',
+              title: '展才',
               icon: Icons.edit_note_outlined,
               destination: const TrainingModeScreen(),
               onReturn: () {
@@ -148,7 +148,7 @@ class _JinshiPointCard extends StatelessWidget {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text('默写点数', style: theme.textTheme.titleMedium),
+                  Text('默诵值', style: theme.textTheme.titleMedium),
                   const SizedBox(height: 3),
                   Text(
                     '首次通过进士模式的诗词数量',

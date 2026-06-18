@@ -110,7 +110,7 @@ ProsodyMetadata inferProsodyMetadata({
       system: Poem.prosodySystemRegulatedVerse,
       form: regulatedForm,
       rhymeBook: rhymeBook,
-      note: '结构已识别为$regulatedForm。默认按$rhymeBook 查看，平仄、粘对和多音字细查会逐步补上。',
+      note: '结构已识别为$regulatedForm。默认按$rhymeBook 查看；多音字确认后自动进行格律审查。',
     );
   }
 

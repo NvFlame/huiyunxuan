@@ -736,7 +736,7 @@ class _TrainingModeScreenState extends State<TrainingModeScreen> {
           ? FloatingActionButton.extended(
               onPressed: () => unawaited(_openPoemChat()),
               icon: const Icon(Icons.smart_toy_outlined),
-              label: const Text('问老师'),
+              label: const Text('问道'),
             )
           : null,
       bottomNavigationBar: _buildBottomBar(),
@@ -750,7 +750,7 @@ class _TrainingModeScreenState extends State<TrainingModeScreen> {
     if (_error != null) {
       return _TrainingMessageView(
         icon: Icons.error_outline,
-        title: '训练模式读取失败',
+        title: '展才读取失败',
         message: _error!,
       );
     }
@@ -772,7 +772,7 @@ class _TrainingModeScreenState extends State<TrainingModeScreen> {
       return const _TrainingMessageView(
         icon: Icons.error_outline,
         title: '没有可训练的诗词',
-        message: '请返回后重新进入训练模式。',
+        message: '请返回后重新进入展才。',
       );
     }
 
@@ -1213,7 +1213,7 @@ class _TrainingTitle extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final name = collection?.name ?? '训练模式';
+    final name = collection?.name ?? '展才';
 
     return Column(
       mainAxisSize: MainAxisSize.min,
@@ -1716,21 +1716,25 @@ class _TrainingContentSection extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
     return Card(
       margin: const EdgeInsets.symmetric(vertical: 6),
-      child: ExpansionTile(
-        initiallyExpanded: initiallyExpanded,
-        shape: const RoundedRectangleBorder(side: BorderSide.none),
-        collapsedShape: const RoundedRectangleBorder(side: BorderSide.none),
-        leading: Icon(icon),
-        title: Text(title),
-        childrenPadding: const EdgeInsets.fromLTRB(16, 0, 16, 14),
-        children: [
-          Align(
-            alignment: Alignment.centerLeft,
-            child: child,
-          ),
-        ],
+      child: Theme(
+        data: theme.copyWith(dividerColor: Colors.transparent),
+        child: ExpansionTile(
+          initiallyExpanded: initiallyExpanded,
+          shape: const RoundedRectangleBorder(side: BorderSide.none),
+          collapsedShape: const RoundedRectangleBorder(side: BorderSide.none),
+          leading: Icon(icon),
+          title: Text(title),
+          childrenPadding: const EdgeInsets.fromLTRB(16, 0, 16, 14),
+          children: [
+            Align(
+              alignment: Alignment.centerLeft,
+              child: child,
+            ),
+          ],
+        ),
       ),
     );
   }
