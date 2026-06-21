@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../data/app_database.dart';
 import '../models/poem_collection.dart';
+import '../services/poem_collection_export_service.dart';
 import '../services/poem_import_service.dart';
 import 'poem_agent_chat_screen.dart';
 import 'poem_list_screen.dart';
@@ -14,7 +15,10 @@ class CollectionListScreen extends StatefulWidget {
 }
 
 class _CollectionListScreenState extends State<CollectionListScreen> {
+  static const _exportService = PoemCollectionExportService();
+
   late Future<List<PoemCollection>> _collectionsFuture;
+  int? _exportingCollectionId;
 
   @override
   void initState() {
@@ -162,6 +166,47 @@ class _CollectionListScreenState extends State<CollectionListScreen> {
     await _refreshCollections();
   }
 
+  Future<void> _exportCollection(PoemCollection collection) async {
+    final id = collection.id;
+    if (id == null || _exportingCollectionId != null) {
+      return;
+    }
+
+    setState(() {
+      _exportingCollectionId = id;
+    });
+    try {
+      final result = await _exportService.exportCollection(collection);
+      if (!mounted) {
+        return;
+      }
+      ScaffoldMessenger.of(context)
+        ..hideCurrentSnackBar()
+        ..showSnackBar(
+          SnackBar(
+            content: Text(
+              result == null
+                  ? '已取消导出'
+                  : '已导出“${collection.name}”，共 ${result.poemCount} 首诗词',
+            ),
+          ),
+        );
+    } catch (error) {
+      if (!mounted) {
+        return;
+      }
+      ScaffoldMessenger.of(context)
+        ..hideCurrentSnackBar()
+        ..showSnackBar(SnackBar(content: Text('导出失败：$error')));
+    } finally {
+      if (mounted) {
+        setState(() {
+          _exportingCollectionId = null;
+        });
+      }
+    }
+  }
+
   Future<void> _openCollection(PoemCollection collection) async {
     await Navigator.push<void>(
       context,
@@ -230,6 +275,7 @@ class _CollectionListScreenState extends State<CollectionListScreen> {
               itemCount: collections.length,
               itemBuilder: (context, index) {
                 final collection = collections[index];
+                final isExporting = _exportingCollectionId == collection.id;
                 return Card(
                   child: ListTile(
                     leading: const Icon(Icons.folder_outlined),
@@ -248,21 +294,38 @@ class _CollectionListScreenState extends State<CollectionListScreen> {
                     trailing: PopupMenuButton<_CollectionAction>(
                       onSelected: (action) {
                         switch (action) {
+                          case _CollectionAction.export:
+                            _exportCollection(collection);
                           case _CollectionAction.edit:
                             _showCollectionDialog(collection: collection);
                           case _CollectionAction.delete:
                             _deleteCollection(collection);
                         }
                       },
-                      itemBuilder: (context) => const [
+                      itemBuilder: (context) => [
                         PopupMenuItem(
+                          value: _CollectionAction.export,
+                          enabled: !isExporting,
+                          child: ListTile(
+                            leading: isExporting
+                                ? const SizedBox.square(
+                                    dimension: 20,
+                                    child: CircularProgressIndicator(
+                                      strokeWidth: 2,
+                                    ),
+                                  )
+                                : const Icon(Icons.download_outlined),
+                            title: Text(isExporting ? '导出中' : '导出'),
+                          ),
+                        ),
+                        const PopupMenuItem(
                           value: _CollectionAction.edit,
                           child: ListTile(
                             leading: Icon(Icons.edit_outlined),
                             title: Text('编辑'),
                           ),
                         ),
-                        PopupMenuItem(
+                        const PopupMenuItem(
                           value: _CollectionAction.delete,
                           child: ListTile(
                             leading: Icon(Icons.delete_outline),
@@ -304,7 +367,7 @@ class _CollectionListScreenState extends State<CollectionListScreen> {
   }
 }
 
-enum _CollectionAction { edit, delete }
+enum _CollectionAction { export, edit, delete }
 
 enum _CollectionDialogAction { save, importCollection }
 

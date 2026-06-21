@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../models/poem.dart';
+import '../services/ci_pattern_service.dart';
 import '../services/rhyme_service.dart';
 import '../services/regulated_verse_checker.dart';
 
@@ -11,6 +12,7 @@ class ToneMarkedLineText extends StatelessWidget {
     required this.rhymeBook,
     this.lineNumber = 1,
     this.overridesJson = '',
+    this.marks = const <RegulatedVerseMark>[],
     this.textStyle,
   });
 
@@ -18,6 +20,7 @@ class ToneMarkedLineText extends StatelessWidget {
   final String rhymeBook;
   final int lineNumber;
   final String overridesJson;
+  final List<RegulatedVerseMark> marks;
   final TextStyle? textStyle;
 
   @override
@@ -33,23 +36,40 @@ class ToneMarkedLineText extends StatelessWidget {
     }
 
     final style = textStyle ?? Theme.of(context).textTheme.titleMedium;
-    var toneIndex = 0;
-    return Wrap(
-      spacing: 5,
-      runSpacing: 8,
-      children: [
-        for (final rune in line.runes)
-          if (_isChineseRune(rune))
-            _ToneMarkCell(
-              tone: tones[toneIndex++],
-              textStyle: style,
-            )
-          else if (String.fromCharCode(rune).trim().isNotEmpty)
-            _PunctuationCell(
-              character: String.fromCharCode(rune),
-              textStyle: style,
+    final cells = _buildToneDisplayCells(line, tones, marks);
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final forceSingleLine = _isSevenCharacterLine(line) &&
+            constraints.maxWidth.isFinite &&
+            constraints.maxWidth > 0;
+        final compact = forceSingleLine && constraints.maxWidth < 230;
+        if (forceSingleLine) {
+          return SizedBox(
+            width: constraints.maxWidth,
+            child: FittedBox(
+              alignment: Alignment.centerLeft,
+              fit: BoxFit.scaleDown,
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: _buildToneDisplayRowChildren(
+                  cells,
+                  style,
+                  spacing: compact ? 3 : 5,
+                ),
+              ),
             ),
-      ],
+          );
+        }
+        return Wrap(
+          spacing: 5,
+          runSpacing: 8,
+          children: [
+            for (final cell in cells)
+              _buildToneDisplayWidget(cell, style),
+          ],
+        );
+      },
     );
   }
 }
@@ -69,8 +89,12 @@ class ToneMarkedPoemText extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final regulatedCheck = checkRegulatedVerse(poem);
+    final ciCheck = checkCiPattern(poem);
     final lineChecksByNumber = {
       for (final line in regulatedCheck.lines) line.lineNumber: line,
+    };
+    final ciLineChecksByNumber = {
+      for (final line in ciCheck.lines) line.lineNumber: line,
     };
     final relationsByFirstLine = <int, List<RegulatedVerseRelationCheck>>{};
     for (final relation in regulatedCheck.relations) {
@@ -96,6 +120,7 @@ class ToneMarkedPoemText extends StatelessWidget {
                 lineNumber += 1;
                 final currentLineNumber = lineNumber;
                 final lineMarks = lineChecksByNumber[currentLineNumber]?.marks ??
+                    ciLineChecksByNumber[currentLineNumber]?.marks ??
                     const <RegulatedVerseMark>[];
                 final relationLabels =
                     relationsByFirstLine[currentLineNumber] ??
@@ -126,6 +151,7 @@ class ToneMarkedPoemText extends StatelessWidget {
                         rhymeBook: poem.prosodyRhymeBook,
                         lineNumber: currentLineNumber,
                         overridesJson: poem.prosodyOverridesJson,
+                        marks: lineMarks,
                         textStyle: textStyle,
                       ),
                     ),
@@ -176,25 +202,41 @@ class ToneMarkedLineIssueOverlay extends StatelessWidget {
     }
     return LayoutBuilder(
       builder: (context, constraints) {
+        final useRightEdgeIssueAnchor =
+            labels.isNotEmpty && _usesRightEdgeIssueAnchor(line);
         return Stack(
           clipBehavior: Clip.none,
           children: [
-            child,
+            if (useRightEdgeIssueAnchor)
+              Padding(
+                padding: const EdgeInsets.only(right: _toneMarkedIssueLaneWidth),
+                child: child,
+              )
+            else
+              child,
             if (labels.isNotEmpty)
-              Positioned(
-                left: _clampIssueLeft(
-                  _issueAnchorLeft(line, showLineNumbers: showLineNumbers),
-                  constraints.maxWidth,
+              if (useRightEdgeIssueAnchor)
+                Positioned(
+                  right: -2,
+                  top: _issueTop(line) + lineTopPadding,
+                  child: _IssueDot(labels: labels),
+                )
+              else
+                Positioned(
+                  left: _issueAnchorLeft(
+                    line,
+                    showLineNumbers: showLineNumbers,
+                    maxWidth: constraints.maxWidth,
+                  ),
+                  top: _issueTop(line) + lineTopPadding,
+                  child: _IssueDot(labels: labels),
                 ),
-                top: _issueTop(line) + lineTopPadding,
-                child: _IssueDot(labels: labels),
-              ),
             for (final relation in relations)
               Positioned(
-                left: _clampRelationLineLeft(
-                  _relationLineLeft(line, showLineNumbers: showLineNumbers),
-                  constraints.maxWidth,
-                  minWidth: _chineseCount(line) >= 7 ? 44 : 72,
+                left: _relationLineLeft(
+                  line,
+                  showLineNumbers: showLineNumbers,
+                  maxWidth: constraints.maxWidth,
                 ),
                 right: _relationLineRight(line),
                 bottom: 0,
@@ -212,8 +254,17 @@ const double _toneMarkedLineNumberWidth = 28;
 const double _toneMarkedChineseCellWidth = 26;
 const double _toneMarkedPunctuationCellWidth = 14;
 const double _toneMarkedCellSpacing = 5;
+const double _toneMarkedIssueLaneWidth = 30;
 
-double _issueAnchorLeft(String line, {required bool showLineNumbers}) {
+bool _isSevenCharacterLine(String line) => _chineseCount(line) == 7;
+
+bool _usesRightEdgeIssueAnchor(String line) => _isSevenCharacterLine(line);
+
+double _issueAnchorLeft(
+  String line, {
+  required bool showLineNumbers,
+  required double maxWidth,
+}) {
   final trimmed = line.trim();
   var width = showLineNumbers ? _toneMarkedLineNumberWidth : 0.0;
   var tokenCount = 0;
@@ -234,10 +285,25 @@ double _issueAnchorLeft(String line, {required bool showLineNumbers}) {
     }
     tokenCount += 1;
   }
-  return width + (chineseCount >= 7 ? 56 : 16);
+  final left = width + (chineseCount >= 7 ? 56 : 16);
+  if (!maxWidth.isFinite) {
+    return left;
+  }
+  final maxLeft = maxWidth - 30;
+  if (maxLeft <= 0) {
+    return left;
+  }
+  return left > maxLeft ? maxLeft : left;
 }
 
-double _relationLineLeft(String line, {required bool showLineNumbers}) {
+double _relationLineLeft(
+  String line, {
+  required bool showLineNumbers,
+  required double maxWidth,
+}) {
+  if (_isSevenCharacterLine(line) && maxWidth.isFinite) {
+    return maxWidth - 58;
+  }
   final trimmed = line.trim();
   var width = showLineNumbers ? _toneMarkedLineNumberWidth : 0.0;
   var tokenCount = 0;
@@ -265,43 +331,26 @@ double _relationLineLeft(String line, {required bool showLineNumbers}) {
   if (punctuationLeft == null) {
     return width;
   }
-  return punctuationLeft +
+  final left = punctuationLeft +
       _toneMarkedPunctuationCellWidth +
       (chineseCount >= 7 ? 30 : 0);
-}
-
-double _relationLineRight(String line) {
-  return _chineseCount(line) >= 7 ? 0 : 6;
-}
-
-double _issueTop(String line) {
-  return _chineseCount(line) >= 7 ? 3 : 3;
-}
-
-double _clampIssueLeft(double left, double maxWidth) {
   if (!maxWidth.isFinite) {
     return left;
   }
-  final maxLeft = maxWidth - 30;
-  if (maxLeft <= 0) {
-    return left;
-  }
-  return left > maxLeft ? maxLeft : left;
-}
-
-double _clampRelationLineLeft(
-  double left,
-  double maxWidth, {
-  required double minWidth,
-}) {
-  if (!maxWidth.isFinite) {
-    return left;
-  }
+  const minWidth = 72.0;
   final maxLeft = maxWidth - minWidth;
   if (maxLeft <= 0) {
     return left;
   }
   return left > maxLeft ? maxLeft : left;
+}
+
+double _relationLineRight(String line) {
+  return _isSevenCharacterLine(line) ? 10 : 6;
+}
+
+double _issueTop(String line) {
+  return _isSevenCharacterLine(line) ? 3 : 3;
 }
 
 int _chineseCount(String line) {
@@ -350,6 +399,96 @@ class _IssueDot extends StatelessWidget {
           ),
         ),
       ),
+    );
+  }
+}
+
+List<_ToneDisplayCell> _buildToneDisplayCells(
+  String line,
+  List<ToneCharacter> tones,
+  List<RegulatedVerseMark> marks,
+) {
+  final cells = <_ToneDisplayCell>[];
+  var toneIndex = 0;
+  for (final rune in line.runes) {
+    final character = String.fromCharCode(rune);
+    if (character.trim().isEmpty) {
+      continue;
+    }
+    if (_isChineseRune(rune)) {
+      if (toneIndex >= tones.length) {
+        continue;
+      }
+      toneIndex += 1;
+      cells.add(
+        _ToneDisplayCell(
+          tone: tones[toneIndex - 1],
+          issue: _characterIssueForIndex(marks, toneIndex),
+        ),
+      );
+      continue;
+    }
+    if (_isLineEndPunctuation(character) && cells.isNotEmpty) {
+      final last = cells.removeLast();
+      cells.add(last.copyWith(trailingText: last.trailingText + character));
+    } else {
+      cells.add(_ToneDisplayCell.trailing(character));
+    }
+  }
+  return cells;
+}
+
+List<Widget> _buildToneDisplayRowChildren(
+  List<_ToneDisplayCell> cells,
+  TextStyle? style, {
+  required double spacing,
+}) {
+  final children = <Widget>[];
+  for (var index = 0; index < cells.length; index += 1) {
+    if (index > 0) {
+      children.add(SizedBox(width: spacing));
+    }
+    children.add(_buildToneDisplayWidget(cells[index], style));
+  }
+  return children;
+}
+
+Widget _buildToneDisplayWidget(_ToneDisplayCell cell, TextStyle? style) {
+  if (cell.tone != null) {
+    return _ToneMarkCell(
+      tone: cell.tone!,
+      issue: cell.issue,
+      trailingText: cell.trailingText,
+      textStyle: style,
+    );
+  }
+  return _PunctuationCell(
+    character: cell.trailingText,
+    textStyle: style,
+  );
+}
+
+class _ToneDisplayCell {
+  const _ToneDisplayCell({
+    required this.tone,
+    required this.issue,
+    this.trailingText = '',
+  });
+
+  const _ToneDisplayCell.trailing(String text)
+      : tone = null,
+        issue = _CharacterIssue.none,
+        trailingText = text;
+
+  final ToneCharacter? tone;
+  final _CharacterIssue issue;
+  final String trailingText;
+
+  _ToneDisplayCell copyWith({String? trailingText}) {
+    return _ToneDisplayCell(
+      tone: tone,
+      issue: issue,
+      trailingText: trailingText ?? this.trailingText,
     );
   }
 }
@@ -562,9 +701,16 @@ class _RelationIssuePainter extends CustomPainter {
 }
 
 class _ToneMarkCell extends StatelessWidget {
-  const _ToneMarkCell({required this.tone, this.textStyle});
+  const _ToneMarkCell({
+    required this.tone,
+    required this.issue,
+    this.trailingText = '',
+    this.textStyle,
+  });
 
   final ToneCharacter tone;
+  final _CharacterIssue issue;
+  final String trailingText;
   final TextStyle? textStyle;
 
   @override
@@ -575,26 +721,54 @@ class _ToneMarkCell extends StatelessWidget {
       '多' => const Color(0xFF9B4A00),
       _ => const Color(0xFF777777),
     };
+    final cellWidth =
+        _toneMarkedChineseCellWidth + (trailingText.length * 12.0);
     return SizedBox(
-      width: 26,
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
+      width: cellWidth,
+      child: Stack(
+        clipBehavior: Clip.none,
         children: [
-          Text(
-            tone.character,
-            textAlign: TextAlign.center,
-            style: textStyle?.copyWith(height: 1.15, fontWeight: FontWeight.w600),
-          ),
-          const SizedBox(height: 2),
-          Text(
-            tone.mark,
-            textAlign: TextAlign.center,
-            style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                  height: 1,
-                  color: color,
-                  fontWeight: FontWeight.w700,
+          SizedBox(
+            width: _toneMarkedChineseCellWidth,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  tone.character,
+                  textAlign: TextAlign.center,
+                  style: textStyle?.copyWith(
+                    height: 1.15,
+                    color: issue.toneError ? const Color(0xFF9F241C) : null,
+                    fontWeight: issue.rhymeError || issue.toneError
+                        ? FontWeight.w900
+                        : FontWeight.w600,
+                  ),
                 ),
+                const SizedBox(height: 2),
+                Text(
+                  tone.mark,
+                  textAlign: TextAlign.center,
+                  style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                        height: 1,
+                        color: color,
+                        fontWeight: FontWeight.w700,
+                      ),
+                ),
+              ],
+            ),
           ),
+          if (trailingText.isNotEmpty)
+            Positioned(
+              left: 23,
+              top: 0,
+              child: Text(
+                trailingText,
+                style: textStyle?.copyWith(
+                  height: 1.15,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ),
         ],
       ),
     );
@@ -646,6 +820,38 @@ class _LineLabel {
   final ProsodyCheckColor color;
 }
 
+class _CharacterIssue {
+  const _CharacterIssue({required this.toneError, required this.rhymeError});
+
+  final bool toneError;
+  final bool rhymeError;
+
+  static const none = _CharacterIssue(toneError: false, rhymeError: false);
+}
+
+_CharacterIssue _characterIssueForIndex(
+  List<RegulatedVerseMark> marks,
+  int index,
+) {
+  var toneError = false;
+  var rhymeError = false;
+  for (final mark in marks) {
+    if (index < mark.start || index > mark.end) {
+      continue;
+    }
+    if (mark.color == ProsodyCheckColor.red && mark.label == '平仄') {
+      toneError = true;
+    }
+    if (mark.color == ProsodyCheckColor.red && mark.label == '出韵') {
+      rhymeError = true;
+    }
+  }
+  if (!toneError && !rhymeError) {
+    return _CharacterIssue.none;
+  }
+  return _CharacterIssue(toneError: toneError, rhymeError: rhymeError);
+}
+
 List<_LineLabel> _visibleLineLabels(List<RegulatedVerseMark> marks) {
   final labels = <_LineLabel>[];
   for (final mark in marks) {
@@ -661,6 +867,9 @@ List<_LineLabel> _visibleLineLabels(List<RegulatedVerseMark> marks) {
 }
 
 bool _shouldShowLineLabel(RegulatedVerseMark mark) {
+  if (mark.label == '平仄' || mark.label == '出韵') {
+    return false;
+  }
   if (mark.color == ProsodyCheckColor.red) {
     return true;
   }
@@ -683,8 +892,21 @@ bool _isChineseRune(int rune) {
 }
 
 bool _isRelationPunctuation(String character) {
+  return _isLineEndPunctuation(character);
+}
+
+bool _isLineEndPunctuation(String character) {
   return character == '，' ||
       character == '。' ||
       character == '！' ||
-      character == '？';
+      character == '？' ||
+      character == '、' ||
+      character == '；' ||
+      character == '：' ||
+      character == ',' ||
+      character == '.' ||
+      character == '!' ||
+      character == '?' ||
+      character == ';' ||
+      character == ':';
 }

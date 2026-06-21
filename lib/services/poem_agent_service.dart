@@ -28,26 +28,29 @@ class PoemAgentService {
   }) async {
     final requestHistory = _historyForCurrentRequest(history);
     final latestUserRequest = _latestUserRequest(history);
-    final content = await apiService.createChatCompletion(
-      config: config,
-      messages: [
+    final initialMessages = <Map<String, String>>[
+      {
+        'role': 'system',
+        'content': _buildSystemPrompt(
+          collections: collections,
+          poemsByCollection: poemsByCollection,
+          currentCollection: currentCollection,
+          focusPoem: focusPoem,
+          searchAvailable: config.isSearchEnabled,
+        ),
+      },
+      _latestRequestMessage(latestUserRequest),
+      for (final message in requestHistory)
         {
-          'role': 'system',
-          'content': _buildSystemPrompt(
-            collections: collections,
-            poemsByCollection: poemsByCollection,
-            currentCollection: currentCollection,
-            focusPoem: focusPoem,
-            searchAvailable: config.isSearchEnabled,
-          ),
+          'role': message.role,
+          'content': message.content,
         },
-        _latestRequestMessage(latestUserRequest),
-        for (final message in requestHistory)
-          {
-            'role': message.role,
-            'content': message.content,
-          },
-      ],
+    ];
+    final content = await _createStrictAgentCompletion(
+      config: config,
+      messages: initialMessages,
+      latestUserRequest: latestUserRequest,
+      hasSearchResults: false,
     );
 
     final initialResult = PoemAgentResult.fromJsonText(
@@ -62,7 +65,7 @@ class PoemAgentService {
     if (!config.isSearchEnabled) {
       return const PoemAgentResult(
         type: 'ask',
-        message: '当前 API 配置还没有启用联网搜索。请先在 API 管理中为当前配置填写 Tavily 或博查 API Key，或补充可核验的资料。',
+        message: '当前 API 配置还没有启用联网搜索。请先在设置中为当前配置填写 Tavily 或博查 API Key，或补充可核验的资料。',
       );
     }
 
@@ -88,38 +91,41 @@ class PoemAgentService {
       );
     }
 
-    final finalContent = await apiService.createChatCompletion(
+    final finalMessages = <Map<String, String>>[
+      {
+        'role': 'system',
+        'content': _buildSystemPrompt(
+          collections: collections,
+          poemsByCollection: poemsByCollection,
+          currentCollection: currentCollection,
+          focusPoem: focusPoem,
+          searchAvailable: true,
+          searchResults: searchResults,
+        ),
+      },
+      _latestRequestMessage(latestUserRequest),
+      for (final message in requestHistory)
+        {
+          'role': message.role,
+          'content': message.content,
+        },
+      {
+        'role': 'assistant',
+        'content': content,
+      },
+      {
+        'role': 'system',
+        'content': 'App 已根据以下 query 完成联网搜索：${searchQueries.join('；')}。'
+            '请逐一处理用户本轮要求的每一首诗，不能因为某一个 query 的结果里没有另一首诗就判断另一首不存在。'
+            '如果是批量添加，能确认全部诗词时优先返回 add_poems。不要再次返回 search 或 search_batch。'
+            '最终结果只能围绕“本轮用户最新请求”，不得把历史对话中的其它诗题、其它添加任务或旧搜索结果当作当前目标。',
+      },
+    ];
+    final finalContent = await _createStrictAgentCompletion(
       config: config,
-      messages: [
-        {
-          'role': 'system',
-          'content': _buildSystemPrompt(
-            collections: collections,
-            poemsByCollection: poemsByCollection,
-            currentCollection: currentCollection,
-            focusPoem: focusPoem,
-            searchAvailable: true,
-            searchResults: searchResults,
-          ),
-        },
-        _latestRequestMessage(latestUserRequest),
-        for (final message in requestHistory)
-          {
-            'role': message.role,
-            'content': message.content,
-          },
-        {
-          'role': 'assistant',
-          'content': content,
-        },
-        {
-          'role': 'system',
-          'content': 'App 已根据以下 query 完成联网搜索：${searchQueries.join('；')}。'
-              '请逐一处理用户本轮要求的每一首诗，不能因为某一个 query 的结果里没有另一首诗就判断另一首不存在。'
-              '如果是批量添加，能确认全部诗词时优先返回 add_poems。不要再次返回 search 或 search_batch。'
-              '最终结果只能围绕“本轮用户最新请求”，不得把历史对话中的其它诗题、其它添加任务或旧搜索结果当作当前目标。',
-        },
-      ],
+      messages: finalMessages,
+      latestUserRequest: latestUserRequest,
+      hasSearchResults: true,
     );
 
     final finalResult = PoemAgentResult.fromJsonText(
@@ -139,6 +145,79 @@ class PoemAgentService {
       );
     }
     return finalResult;
+  }
+
+  Future<String> _createStrictAgentCompletion({
+    required ApiConfig config,
+    required List<Map<String, String>> messages,
+    required String latestUserRequest,
+    required bool hasSearchResults,
+  }) async {
+    var currentMessages = List<Map<String, String>>.from(messages);
+    var lastContent = '';
+    for (var attempt = 0; attempt < 3; attempt += 1) {
+      lastContent = await apiService.createChatCompletion(
+        config: config,
+        messages: currentMessages,
+      );
+      if (!_shouldRetryIntermediateReply(lastContent, latestUserRequest)) {
+        return lastContent;
+      }
+      currentMessages = <Map<String, String>>[
+        ...messages,
+        {
+          'role': 'assistant',
+          'content': lastContent,
+        },
+        {
+          'role': 'system',
+          'content': _intermediateReplyRepairPrompt(
+            hasSearchResults: hasSearchResults,
+          ),
+        },
+      ];
+    }
+
+    return jsonEncode({
+      'type': 'ask',
+      'message': '模型只返回了“正在检索/正在处理”之类的中间态说明，没有给出可执行结果。请重新发送，或补充作者、首句、目标诗词库等限定信息后再试。',
+    });
+  }
+
+  bool _shouldRetryIntermediateReply(String content, String latestUserRequest) {
+    if (!_looksLikeActionRequest(latestUserRequest)) {
+      return false;
+    }
+
+    final jsonObject = _tryExtractJsonObject(content);
+    if (jsonObject == null) {
+      return _looksLikeIntermediateReply(content);
+    }
+
+    try {
+      final decoded = jsonDecode(jsonObject);
+      final map = _readObjectMap(decoded);
+      if (map == null) {
+        return false;
+      }
+      final type = (map['type'] as String?)?.trim();
+      if (type != null && type != 'answer') {
+        return false;
+      }
+      return _looksLikeIntermediateReply(_plainTextFromModel(map['message']));
+    } catch (_) {
+      return false;
+    }
+  }
+
+  String _intermediateReplyRepairPrompt({required bool hasSearchResults}) {
+    final allowedAction = hasSearchResults
+        ? 'add_poem、add_poems、update_poem、ask、not_found 或 answer'
+        : 'search、search_batch、add_poem、add_poems、update_poem、ask、not_found 或 answer';
+    return '你刚才返回了中间态说明，但 App 没有后台异步任务，不会在你说“正在检索/正在处理”后自动继续。'
+        '请立刻重新输出一个且仅一个 JSON 对象，type 必须是 $allowedAction。'
+        '如果需要联网搜索，返回 search 或 search_batch；如果已经有搜索结果，必须根据结果返回最终动作。'
+        '禁止输出“正在检索”“我将搜索”“请稍等”“稍后处理”等非最终回复。';
   }
 
   String _buildSystemPrompt({
@@ -221,6 +300,7 @@ annotation:
 
 反例：如果 content 只有 4 个非空原文行，annotation 里绝不能出现 [5]、[6]、[7] 这类行号；也不能写成普通编号或省略行号。[0] 只能用于标题注释，不能用于正文注释。
 
+重要：不要返回“正在检索”“正在搜索”“我将处理”“请稍等”“稍后回复”等中间态说明。App 没有后台异步任务；每次回复都必须是最终可执行 JSON。需要联网时返回 search 或 search_batch；已有搜索结果时返回 add_poem、add_poems、update_poem、ask、not_found 或 answer。
 你必须严格只返回一个 JSON 对象，不要使用 Markdown，不要输出 JSON 之外的任何文字。
 
 JSON 格式只能是以下八类之一：
@@ -262,6 +342,7 @@ JSON 格式只能是以下八类之一：
 - 所有 message、translation、annotation、learning_note、appreciation 等文本字段都必须使用纯文本，不要使用 Markdown 标记；不要输出 **粗体**、# 标题、> 引用、```代码块``` 或反引号。
 - 普通回答如需分点，可使用自然段或“1.”、“2.”这样的纯文本编号，不要用 Markdown 粗体、标题或引用格式。
 - 即使只是普通问答、赏析或解释，也必须返回 {"type":"answer","message":"回答内容"}，不要直接输出自然语言正文。
+- dynasty/朝代字段必须按本 App 的时期命名填写：辛亥革命、民国、抗战、建国初期主要活动的人物统一写“近代”，例如毛泽东、鲁迅、郁达夫、郭沫若、闻一多、徐志摩等；“当代”只用于改革开放以后或当前仍主要活跃的作者。
 - 用户要求添加诗词时，如果目标库不唯一，必须先追问。
 - 用户要求添加诗词时，如果诗词不唯一，例如“无题”这类同名诗，必须先追问作者、首句或其它可唯一识别的信息。
 - 用户要求一次添加多首诗词，且所有诗词都能唯一确认、并且已经拥有可靠完整全文时，返回 add_poems；如果还没有搜索或资料不足，先返回 search_batch；如果其中任何一首不唯一或无法确认，必须先 ask，不能部分入库。
@@ -286,7 +367,8 @@ JSON 格式只能是以下八类之一：
   - 七绝、七律通常每行 7 个汉字并保留行末标点；五绝、五律通常每行 5 个汉字并保留行末标点；《诗经》等四言诗通常每行 4 个汉字并保留行末标点。
   - 如果原文写作“千里莺啼绿映红，水村山郭酒旗风。”，content 必须写成两行：“千里莺啼绿映红，”换行“水村山郭酒旗风。”；“岂无山歌与村笛？呕哑嘲哳难为听。”同理应拆为两个七言诗句。
   - 词、曲、骚体、长短句、杂言诗必须优先保留权威整理本的通行换行；如果搜索结果无法提供可靠换行，不要自行猜测，应 ask 用户确认或继续补充资料。
-  - 词有上下阙、诗文有自然段落时，content 必须用一个空行分隔上下阙或自然段；空行只用于显示分段，不计入注释行号。
+  - 添加词、曲等有上下阙/上下片/分片的作品时，content 中必须在上阙与下阙之间写入一个空行，也就是两次换行（JSON 字符串中表现为 \n\n）；不要只用一个普通换行把上下阙连在一起。
+  - 例如词的 content 应为“上阙最后一句。\n\n下阙第一句，”这种结构；空行只用于显示分段，不计入注释行号。诗文有自然段落时也按同样方式用一个空行分隔自然段。
   - content 必须保留权威来源或通行整理本中的现代标点，包括逗号、句号、问号、叹号、分号、冒号、顿号等；换行时不得删除标点。
   - 五言、七言诗句如果原整理本为“天上白玉京，十二楼五城。”，应写成“天上白玉京，”换行“十二楼五城。”，不能写成“天上白玉京”换行“十二楼五城”。
   - 如果搜索结果只有无标点古籍文本，应优先继续寻找带标点的权威整理本；不能可靠补出标点时，不要添加入库，应 ask 用户确认是否接受无标点版本。
@@ -719,10 +801,12 @@ class PoemAgentDraft {
   }
 
   factory PoemAgentDraft.fromMap(Map<String, Object?> map) {
+    final author = _plainTextFromModel(map['author']);
+    final dynasty = _plainTextFromModel(map['dynasty']);
     return PoemAgentDraft(
       title: _plainTextFromModel(map['title']),
-      author: _plainTextFromModel(map['author']),
-      dynasty: _plainTextFromModel(map['dynasty']),
+      author: author,
+      dynasty: _normalizeAgentDynasty(dynasty: dynasty, author: author),
       preface: _plainTextFromModel(map['preface']),
       content: _plainTextFromModel(map['content']),
       remark: _plainTextFromModel(map['remark']),
@@ -819,9 +903,56 @@ class PoemAgentUpdates {
         values[key] = _plainTextFromModel(entry.value);
       }
     }
+    if (values.containsKey('dynasty')) {
+      values['dynasty'] = _normalizeAgentDynasty(
+        dynasty: values['dynasty'] ?? '',
+        author: values['author'] ?? '',
+      );
+    }
 
     return PoemAgentUpdates(values: Map.unmodifiable(values));
   }
+}
+
+String _normalizeAgentDynasty({
+  required String dynasty,
+  required String author,
+}) {
+  final text = dynasty.trim();
+  if (text.isEmpty) {
+    return text;
+  }
+  const nearModernLabels = {'当代', '现代', '近现代', '现当代'};
+  final compactText = text.replaceAll(RegExp(r'\s+'), '');
+  if (!nearModernLabels.any(compactText.contains)) {
+    return text;
+  }
+
+  const nearModernAuthorKeywords = <String>{
+    '毛泽东',
+    '鲁迅',
+    '周树人',
+    '周作人',
+    '胡适',
+    '陈独秀',
+    '李大钊',
+    '秋瑾',
+    '柳亚子',
+    '郁达夫',
+    '郭沫若',
+    '闻一多',
+    '徐志摩',
+    '戴望舒',
+    '艾青',
+    '朱德',
+    '陈毅',
+    '叶剑英',
+  };
+  final authorText = author.trim();
+  if (nearModernAuthorKeywords.any(authorText.contains)) {
+    return '近代';
+  }
+  return text;
 }
 
 String _plainTextFromModel(Object? value) {
@@ -862,6 +993,54 @@ String _plainTextFromModel(Object? value) {
       })
       .join('\n')
       .trim();
+}
+
+bool _looksLikeActionRequest(String text) {
+  final normalized = text.replaceAll(RegExp(r'\s+'), '');
+  if (normalized.isEmpty) {
+    return false;
+  }
+
+  const actionKeywords = <String>[
+    '添加',
+    '加入',
+    '入库',
+    '收录',
+    '导入',
+    '放进',
+    '写入',
+    '补充',
+    '完善',
+    '丰富',
+    '更正',
+    '纠错',
+    '修正',
+    '修改',
+    '更新',
+    '校准',
+    '确认平仄',
+    '确认韵部',
+    '搜索',
+    '检索',
+    '查找',
+  ];
+  return actionKeywords.any(normalized.contains);
+}
+
+bool _looksLikeIntermediateReply(String text) {
+  final normalized = _plainTextFromModel(text).replaceAll(RegExp(r'\s+'), '');
+  if (normalized.isEmpty) {
+    return false;
+  }
+
+  final patterns = <RegExp>[
+    RegExp(r'(正在|开始|先)(联网)?(检索|搜索|查询|查找|核验|整理|处理)'),
+    RegExp(r'(检索|搜索|查询|查找|核验|整理|处理)中'),
+    RegExp(r'(我会|我将|我来|我先|接下来).{0,16}(检索|搜索|查询|查找|核验|整理|处理|添加|写入)'),
+    RegExp(r'(请稍等|稍等|马上为你|稍后|稍候)'),
+    RegExp(r'(需要|需)先(联网)?(检索|搜索|查询|查找|核验)'),
+  ];
+  return patterns.any((pattern) => pattern.hasMatch(normalized));
 }
 
 String? _tryExtractJsonObject(String text) {

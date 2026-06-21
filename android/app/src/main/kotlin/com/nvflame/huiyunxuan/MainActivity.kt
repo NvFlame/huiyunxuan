@@ -1,4 +1,4 @@
-package com.example.huiyunxuan
+package com.nvflame.huiyunxuan
 
 import io.flutter.embedding.android.FlutterActivity
 

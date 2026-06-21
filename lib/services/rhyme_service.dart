@@ -176,6 +176,20 @@ List<ToneCharacter> analyzeLineTones(
   );
 }
 
+List<RhymeEntry> lookupRhymeEntriesForProsodyFoot({
+  required int lineNumber,
+  required String character,
+  required String rhymeBook,
+  String overridesJson = '',
+}) {
+  return _lookupRhymeForFoot(
+    lineNumber: lineNumber,
+    character: character,
+    rhymeBook: rhymeBook,
+    overrides: ProsodyOverrideStore.parse(overridesJson),
+  );
+}
+
 RhymeAnalysis _analyzeRegulatedVerse(Poem poem) {
   final lines = _contentLines(poem.content);
   final overrides = ProsodyOverrideStore.parse(poem.prosodyOverridesJson);

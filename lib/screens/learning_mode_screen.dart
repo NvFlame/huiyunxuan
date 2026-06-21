@@ -273,7 +273,19 @@ class _LearningModeScreenState extends State<LearningModeScreen> {
       _currentPoemCollectionIds = poemCollectionIds;
       _resetLineAnnotationState();
     });
+    _scrollLearningToTopAfterFrame();
     await _saveCurrentProgress();
+  }
+
+  void _scrollLearningToTopAfterFrame() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || !_learningScrollController.hasClients) {
+        return;
+      }
+      _learningScrollController.jumpTo(
+        _learningScrollController.position.minScrollExtent,
+      );
+    });
   }
 
   void _resetLineAnnotationState() {
@@ -391,7 +403,7 @@ class _LearningModeScreenState extends State<LearningModeScreen> {
     }
     final config = await AppDatabase.instance.getActiveApiConfig();
     if (config == null) {
-      _showSnackBar('请先在 API 管理中选择可用配置');
+      _showSnackBar('请先在设置中选择可用配置');
       return;
     }
 
@@ -1497,6 +1509,7 @@ class _PoemContentViewState extends State<_PoemContentView> {
                                   lineNumber: currentLineNumber,
                                   overridesJson:
                                       widget.poem.prosodyOverridesJson,
+                                  marks: lineMarks,
                                   textStyle:
                                       theme.textTheme.titleMedium?.copyWith(
                                     height: 1.25,

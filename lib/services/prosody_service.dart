@@ -1,4 +1,6 @@
 import '../models/poem.dart';
+import 'ci_pattern_service.dart';
+import 'ci_tune_catalog.dart';
 
 class ProsodyMetadata {
   const ProsodyMetadata({
@@ -47,15 +49,62 @@ ProsodyMetadata inferProsodyMetadata({
   final normalizedTitle = _normalizeTitle(title);
   final lineCharCounts = _contentLineCharCounts(content);
   final lineCount = lineCharCounts.length;
-  final ciTune = _detectCiTune(normalizedTitle);
+  final dynastySupportsProsody =
+      _regulatedVerseDynastyBlockReason(dynasty) == null;
+  final regulatedForm = _detectRegulatedVerseForm(lineCharCounts);
+  if (regulatedForm != null) {
+    final unsupportedReason = _unsupportedReason(
+      title: normalizedTitle,
+      dynasty: dynasty,
+      remark: remark,
+      lineCount: lineCount,
+    );
+    if (unsupportedReason != null) {
+      return ProsodyMetadata(
+        supported: false,
+        enabled: false,
+        system: Poem.prosodySystemUnsupported,
+        form: regulatedForm,
+        rhymeBook: '',
+        note: unsupportedReason,
+      );
+    }
+    final dynastyReason = _regulatedVerseDynastyBlockReason(dynasty);
+    if (dynastyReason != null) {
+      return ProsodyMetadata(
+        supported: false,
+        enabled: false,
+        system: Poem.prosodySystemUnsupported,
+        form: regulatedForm,
+        rhymeBook: '',
+        note: dynastyReason,
+      );
+    }
+    final rhymeBook = _isModernDynasty(dynasty)
+        ? Poem.rhymeBookXinYun
+        : Poem.rhymeBookPingShui;
+    return ProsodyMetadata(
+      supported: true,
+      enabled: true,
+      system: Poem.prosodySystemRegulatedVerse,
+      form: regulatedForm,
+      rhymeBook: rhymeBook,
+      note: '结构已识别为$regulatedForm。默认按$rhymeBook 查看；多音字确认后自动进行格律审查。',
+    );
+  }
+
+  final ciTune = dynastySupportsProsody ? _detectCiTune(normalizedTitle) : null;
   if (ciTune != null) {
+    final hasPattern = hasCiPatternForTune(ciTune);
     return ProsodyMetadata(
       supported: true,
       enabled: true,
       system: Poem.prosodySystemCi,
       form: ciTune,
       rhymeBook: Poem.rhymeBookCiLin,
-      note: '已识别为词牌。默认按词林正韵查看，详细词谱、平仄和押韵检查会逐步接入。',
+      note: hasPattern
+          ? '已识别为词牌《$ciTune》。开启格律审查后按已接入词谱比对。'
+          : '已识别为词牌《$ciTune》，但本地词谱暂未接入；暂不支持该词牌的格律审查。',
     );
   }
 
@@ -85,32 +134,6 @@ ProsodyMetadata inferProsodyMetadata({
       form: '',
       rhymeBook: '',
       note: unsupportedReason,
-    );
-  }
-
-  final regulatedForm = _detectRegulatedVerseForm(lineCharCounts);
-  if (regulatedForm != null) {
-    final dynastyReason = _regulatedVerseDynastyBlockReason(dynasty);
-    if (dynastyReason != null) {
-      return ProsodyMetadata(
-        supported: false,
-        enabled: false,
-        system: Poem.prosodySystemUnsupported,
-        form: regulatedForm,
-        rhymeBook: '',
-        note: dynastyReason,
-      );
-    }
-    final rhymeBook = _isModernDynasty(dynasty)
-        ? Poem.rhymeBookXinYun
-        : Poem.rhymeBookPingShui;
-    return ProsodyMetadata(
-      supported: true,
-      enabled: true,
-      system: Poem.prosodySystemRegulatedVerse,
-      form: regulatedForm,
-      rhymeBook: rhymeBook,
-      note: '结构已识别为$regulatedForm。默认按$rhymeBook 查看；多音字确认后自动进行格律审查。',
     );
   }
 
@@ -311,9 +334,18 @@ String? _unsupportedReason({
 }
 
 String? _detectCiTune(String title) {
-  final titleBeforeSeparator = title.split(RegExp(r'[·・]')).first;
-  for (final name in _ciTuneNames) {
-    if (title.startsWith(name) || titleBeforeSeparator == name) {
+  final supportedNames = supportedCiPatternTuneNames().toList()
+    ..sort((a, b) => b.length.compareTo(a.length));
+  for (final name in supportedNames) {
+    if (titleMatchesCiTune(title, name)) {
+      return name;
+    }
+  }
+
+  final catalogNames = ciTuneCatalogNames.toList()
+    ..sort((a, b) => b.length.compareTo(a.length));
+  for (final name in catalogNames) {
+    if (titleMatchesCiTune(title, name)) {
       return name;
     }
   }
@@ -328,47 +360,6 @@ String? _detectQuTune(String title) {
   }
   return null;
 }
-
-const _ciTuneNames = <String>{
-  '永遇乐',
-  '念奴娇',
-  '水调歌头',
-  '满江红',
-  '虞美人',
-  '蝶恋花',
-  '鹊桥仙',
-  '江城子',
-  '浣溪沙',
-  '卜算子',
-  '如梦令',
-  '声声慢',
-  '青玉案',
-  '雨霖铃',
-  '破阵子',
-  '渔家傲',
-  '苏幕遮',
-  '定风波',
-  '西江月',
-  '临江仙',
-  '菩萨蛮',
-  '沁园春',
-  '扬州慢',
-  '摸鱼儿',
-  '暗香',
-  '疏影',
-  '贺新郎',
-  '一剪梅',
-  '踏莎行',
-  '南乡子',
-  '浪淘沙',
-  '清平乐',
-  '忆江南',
-  '点绛唇',
-  '减字木兰花',
-  '木兰花慢',
-  '八声甘州',
-  '桂枝香',
-};
 
 const _quTuneNames = <String>{
   '天净沙',

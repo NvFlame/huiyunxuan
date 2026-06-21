@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../models/poem.dart';
+import '../services/ci_pattern_service.dart';
 import '../services/prosody_service.dart';
 import '../services/rhyme_service.dart';
 import '../services/regulated_verse_checker.dart';
@@ -36,11 +37,45 @@ class ProsodyPanel extends StatelessWidget {
     final verificationLabel = _verificationLabel(poem);
     final rhymeAnalysis = analyzeRhyme(poem);
     final regulatedCheck = checkRegulatedVerse(poem);
+    final ciCheck = checkCiPattern(poem);
     final isRegulatedVerse =
         poem.prosodySystem == Poem.prosodySystemRegulatedVerse;
+    final isCi = poem.prosodySystem == Poem.prosodySystemCi;
+    final isStructuredProsody = isRegulatedVerse || isCi;
     final displayForm = regulatedCheck.applicable
         ? regulatedCheck.displayForm
-        : form;
+        : ciCheck.applicable
+            ? ciCheck.displayForm
+            : form;
+    final formChecked = regulatedCheck.applicable || ciCheck.applicable;
+    final formUnresolved = regulatedCheck.applicable
+        ? regulatedCheck.unresolved
+        : ciCheck.applicable
+            ? ciCheck.unresolved
+            : false;
+    final formOk = regulatedCheck.applicable
+        ? regulatedCheck.ok
+        : ciCheck.applicable
+            ? ciCheck.ok
+            : false;
+    final unsupportedCiPattern =
+        ciCheck.applicable && !ciCheck.supportedPattern;
+    final usesCiPatternRhyme = ciCheck.applicable && ciCheck.supportedPattern;
+    final primaryRhyme = unsupportedCiPattern
+        ? ''
+        : usesCiPatternRhyme
+            ? ciCheck.primaryRhyme
+            : rhymeAnalysis.primaryRhyme;
+    final rhymeNeedsConfirmation = usesCiPatternRhyme
+        ? ciCheck.unresolved
+        : rhymeAnalysis.needsConfirmation;
+    final details = unsupportedCiPattern
+        ? <String>[]
+        : <String>[
+            if (ciCheck.applicable) ...ciCheck.details,
+            if (!ciCheck.applicable || !ciCheck.supportedPattern)
+              ...rhymeAnalysis.details,
+          ];
 
     return Card(
       margin: const EdgeInsets.symmetric(vertical: 6),
@@ -68,10 +103,12 @@ class ProsodyPanel extends StatelessWidget {
                     dense: true,
                     value: showToneDetails,
                     onChanged: onToneDetailsChanged,
-                    title: Text(isRegulatedVerse ? '格律审查' : '逐字平仄'),
+                    title: Text(isStructuredProsody ? '格律审查' : '逐字平仄'),
                     subtitle: Text(
                       isRegulatedVerse
                           ? '打开后在正文中显示逐字平仄；平仄全部确定后自动进行正格审查。'
+                          : isCi
+                              ? '打开后在正文中显示逐字平仄，并按已接入词谱自动校对。'
                           : '打开后显示每一句每个字的平仄初判。',
                     ),
                   ),
@@ -84,16 +121,15 @@ class ProsodyPanel extends StatelessWidget {
                         label: prosodySystemLabel(poem.prosodySystem),
                         icon: Icons.category_outlined,
                       ),
-                      if (displayForm.isNotEmpty)
+                      if (displayForm.isNotEmpty && !unsupportedCiPattern)
                         _ProsodyChip(
                           label: displayForm,
                           icon:
-                              regulatedCheck.applicable && !regulatedCheck.ok
+                              formChecked && !formOk
                                   ? Icons.report_problem_outlined
                                   : Icons.format_list_numbered,
-                          color: regulatedCheck.applicable &&
-                                  !regulatedCheck.unresolved
-                              ? (regulatedCheck.ok
+                          color: formChecked && !formUnresolved
+                              ? (formOk
                                   ? const Color(0xFFE9F7EA)
                                   : const Color(0xFFFFE9E4))
                               : null,
@@ -103,10 +139,10 @@ class ProsodyPanel extends StatelessWidget {
                           label: rhymeBook,
                           icon: Icons.library_books,
                         ),
-                      if (rhymeAnalysis.primaryRhyme.isNotEmpty)
+                      if (primaryRhyme.isNotEmpty)
                         _ProsodyChip(
-                          label: '韵部：${rhymeAnalysis.primaryRhyme}',
-                          icon: rhymeAnalysis.needsConfirmation
+                          label: '韵部：$primaryRhyme',
+                          icon: rhymeNeedsConfirmation
                               ? Icons.help_outline
                               : Icons.check_circle_outline,
                         ),
@@ -123,17 +159,18 @@ class ProsodyPanel extends StatelessWidget {
                       poem: poem,
                       rhymeAnalysis: rhymeAnalysis,
                       regulatedCheck: regulatedCheck,
+                      ciCheck: ciCheck,
                     ),
                     style: theme.textTheme.bodyMedium?.copyWith(
                       height: 1.55,
                       color: const Color(0xFF4F3B12),
                     ),
                   ),
-                  if (rhymeAnalysis.details.isNotEmpty) ...[
+                  if (details.isNotEmpty) ...[
                     const SizedBox(height: 8),
-                    _ProsodyDetailList(details: rhymeAnalysis.details),
+                    _ProsodyDetailList(details: details),
                   ],
-                  if (note.isNotEmpty) ...[
+                  if (note.isNotEmpty && !unsupportedCiPattern) ...[
                     const SizedBox(height: 8),
                     Text(
                       note,
@@ -185,7 +222,7 @@ class ProsodyPanel extends StatelessWidget {
       case Poem.prosodySystemRegulatedVerse:
         return '当前按近体诗显示。平仄、粘对和多音字校验会在后续补上。';
       case Poem.prosodySystemCi:
-        return '当前按词牌显示。词谱句式、平仄和押韵位置会在后续补上。';
+        return '当前按词牌显示；已接入词谱时可自动校对句式、平仄、押韵和叠句。';
       case Poem.prosodySystemQu:
         return '当前按曲牌显示。曲谱与中原音韵检查会在后续补上。';
       default:
@@ -197,9 +234,13 @@ class ProsodyPanel extends StatelessWidget {
     required Poem poem,
     required RhymeAnalysis rhymeAnalysis,
     required RegulatedVerseCheck regulatedCheck,
+    required CiPatternCheck ciCheck,
   }) {
     if (regulatedCheck.applicable) {
       return regulatedCheck.summary;
+    }
+    if (ciCheck.applicable) {
+      return ciCheck.summary;
     }
     if (rhymeAnalysis.applicable) {
       return rhymeAnalysis.summary;

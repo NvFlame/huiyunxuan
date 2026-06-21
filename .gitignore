@@ -40,6 +40,9 @@ tools/build/
 tools/dist/
 tools/*.spec
 
+# Local app backup packages
+*.hyxbak
+
 # Symbolication related
 app.*.symbols
 

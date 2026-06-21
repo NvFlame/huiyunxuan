@@ -130,7 +130,7 @@ class _PoemAgentChatScreenState extends State<PoemAgentChatScreen> {
     List<PoemCollection> collections,
   ) {
     if (config == null) {
-      return '请先在“API管理”中添加并选中一个可用的 API 配置。';
+      return '请先在“设置”中添加并选中一个可用的 API 配置。';
     }
     if (collections.isEmpty) {
       return '当前还没有诗词库。请先创建诗词库，再让我帮你添加或编辑诗词。';

@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../data/app_database.dart';
 import '../models/api_config.dart';
+import '../services/app_backup_service.dart';
 import 'api_config_editor_screen.dart';
 
 class ApiSettingsScreen extends StatefulWidget {
@@ -12,9 +13,12 @@ class ApiSettingsScreen extends StatefulWidget {
 }
 
 class _ApiSettingsScreenState extends State<ApiSettingsScreen> {
+  static const _backupService = AppBackupService();
+
   final _searchController = TextEditingController();
   late Future<List<ApiConfig>> _configsFuture;
   bool _showSearch = false;
+  bool _backupBusy = false;
 
   @override
   void initState() {
@@ -110,11 +114,145 @@ class _ApiSettingsScreenState extends State<ApiSettingsScreen> {
     });
   }
 
+  void _showSnackBar(String message) {
+    if (!mounted) {
+      return;
+    }
+    ScaffoldMessenger.of(context)
+      ..hideCurrentSnackBar()
+      ..showSnackBar(SnackBar(content: Text(message)));
+  }
+
+  Future<void> _showBackupActions() async {
+    await showModalBottomSheet<void>(
+      context: context,
+      builder: (context) {
+        return SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.symmetric(vertical: 10),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                ListTile(
+                  leading: const Icon(Icons.backup_outlined),
+                  title: const Text('生成备份包'),
+                  subtitle: const Text('导出诗词库、设置、笔记、格律校准与学习训练进度，备份包会包含 API Key'),
+                  onTap: () {
+                    Navigator.pop(context);
+                    _exportBackup();
+                  },
+                ),
+                ListTile(
+                  leading: const Icon(Icons.restore_outlined),
+                  title: const Text('从备份包导入'),
+                  subtitle: const Text('导入会覆盖当前 App 内的全部数据'),
+                  onTap: () {
+                    Navigator.pop(context);
+                    _confirmAndImportBackup();
+                  },
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  Future<void> _exportBackup() async {
+    if (_backupBusy) {
+      return;
+    }
+    setState(() {
+      _backupBusy = true;
+    });
+    try {
+      final result = await _backupService.exportBackup();
+      if (!mounted) {
+        return;
+      }
+      if (result == null) {
+        _showSnackBar('已取消备份');
+        return;
+      }
+      _showSnackBar(
+        '备份已生成：${result.collectionCount} 个诗词库，${result.poemCount} 首诗词',
+      );
+    } catch (error) {
+      _showSnackBar('生成备份失败：$error');
+    } finally {
+      if (mounted) {
+        setState(() {
+          _backupBusy = false;
+        });
+      }
+    }
+  }
+
+  Future<void> _confirmAndImportBackup() async {
+    if (_backupBusy) {
+      return;
+    }
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) {
+        return AlertDialog(
+          title: const Text('导入备份包'),
+          content: const Text(
+            '导入会覆盖当前诗词库、设置、API 配置、学习笔记、格律校准、对话记录和训练进度。当前数据不会自动保留，确定继续吗？',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text('取消'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(context, true),
+              child: const Text('确定导入'),
+            ),
+          ],
+        );
+      },
+    );
+
+    if (confirmed != true) {
+      return;
+    }
+
+    setState(() {
+      _backupBusy = true;
+    });
+    try {
+      final result = await _backupService.pickAndImportBackup();
+      if (!mounted) {
+        return;
+      }
+      if (result == null) {
+        _showSnackBar('已取消导入');
+        return;
+      }
+      await _refreshConfigs();
+      _showSnackBar(
+        '导入完成：${result.collectionCount} 个诗词库，${result.poemCount} 首诗词',
+      );
+    } on BackupImportException catch (error) {
+      _showSnackBar(error.message);
+    } catch (error) {
+      _showSnackBar('导入失败：$error');
+    } finally {
+      if (mounted) {
+        setState(() {
+          _backupBusy = false;
+        });
+      }
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('API管理'),
+        title: const Text('设置'),
         actions: [
           IconButton(
             tooltip: _showSearch ? '关闭搜索' : '搜索',
@@ -193,6 +331,25 @@ class _ApiSettingsScreenState extends State<ApiSettingsScreen> {
                   ),
                 );
               },
+            ),
+          ),
+          SafeArea(
+            top: false,
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
+              child: SizedBox(
+                width: double.infinity,
+                child: FilledButton.tonalIcon(
+                  onPressed: _backupBusy ? null : _showBackupActions,
+                  icon: _backupBusy
+                      ? const SizedBox.square(
+                          dimension: 18,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        )
+                      : const Icon(Icons.inventory_2_outlined),
+                  label: Text(_backupBusy ? '处理中' : '备份与导入'),
+                ),
+              ),
             ),
           ),
         ],

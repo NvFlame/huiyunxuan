@@ -118,42 +118,58 @@ class _CandidateEditor extends StatelessWidget {
           ),
         ),
         const SizedBox(height: 8),
-        Row(
-          children: [
-            Expanded(
-              child: DropdownButtonFormField<String>(
-                value: toneValue,
-                decoration: const InputDecoration(labelText: '平仄'),
-                items: const [
-                  DropdownMenuItem(value: '', child: Text('不确定')),
-                  DropdownMenuItem(value: '平', child: Text('平')),
-                  DropdownMenuItem(value: '仄', child: Text('仄')),
-                  DropdownMenuItem(value: '多', child: Text('多音')),
-                ],
-                onChanged: (tone) {
-                  onChanged(value.copyWith(tone: tone ?? ''));
-                },
-              ),
-            ),
-            const SizedBox(width: 8),
-            Expanded(
-              child: DropdownButtonFormField<String>(
-                value: rhymeOptions.contains(value.rhyme) ? value.rhyme : '',
-                decoration: const InputDecoration(labelText: '韵部'),
-                items: [
-                  for (final option in rhymeOptions)
-                    DropdownMenuItem(
-                      value: option,
-                      child: Text(option.isEmpty ? '不指定' : option),
-                    ),
-                ],
-                onChanged: (rhyme) {
-                  onChanged(value.copyWith(rhyme: rhyme ?? ''));
-                },
-              ),
-            ),
+        DropdownButtonFormField<String>(
+          value: toneValue,
+          decoration: const InputDecoration(labelText: '平仄'),
+          isExpanded: true,
+          items: const [
+            DropdownMenuItem(value: '', child: Text('不确定')),
+            DropdownMenuItem(value: '平', child: Text('平')),
+            DropdownMenuItem(value: '仄', child: Text('仄')),
+            DropdownMenuItem(value: '多', child: Text('多音')),
           ],
+          onChanged: (tone) {
+            onChanged(value.copyWith(tone: tone ?? ''));
+          },
         ),
+        const SizedBox(height: 8),
+        DropdownButtonFormField<String>(
+          value: rhymeOptions.contains(value.rhyme) ? value.rhyme : '',
+          decoration: const InputDecoration(labelText: '韵部'),
+          isExpanded: true,
+          menuMaxHeight: 320,
+          selectedItemBuilder: (context) => [
+            for (final option in rhymeOptions)
+              Text(
+                option.isEmpty ? '不指定' : option,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              ),
+          ],
+          items: [
+            for (final option in rhymeOptions)
+              DropdownMenuItem(
+                value: option,
+                child: Text(
+                  option.isEmpty ? '不指定' : option,
+                  softWrap: true,
+                ),
+              ),
+          ],
+          onChanged: (rhyme) {
+            onChanged(value.copyWith(rhyme: rhyme ?? ''));
+          },
+        ),
+        if (value.rhyme.trim().isNotEmpty) ...[
+          const SizedBox(height: 4),
+          Text(
+            '当前韵部：${value.rhyme.trim()}',
+            style: theme.textTheme.bodySmall?.copyWith(
+              color: const Color(0xFF6A5219),
+              height: 1.35,
+            ),
+          ),
+        ],
         const SizedBox(height: 8),
         TextFormField(
           initialValue: value.note,

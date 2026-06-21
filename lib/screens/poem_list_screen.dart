@@ -17,8 +17,12 @@ class PoemListScreen extends StatefulWidget {
 
 class _PoemListScreenState extends State<PoemListScreen> {
   final _searchController = TextEditingController();
+  final _listScrollController = ScrollController();
   final Set<int> _selectedPoemIds = <int>{};
   List<int> _visiblePoemIds = const <int>[];
+  List<Poem> _lastPoems = const <Poem>[];
+  Map<int, int> _poemPositions = const <int, int>{};
+  bool _hasLoadedPoems = false;
   late Future<List<Poem>> _poemsFuture;
 
   int get _collectionId => widget.collection.id!;
@@ -38,27 +42,46 @@ class _PoemListScreenState extends State<PoemListScreen> {
   @override
   void dispose() {
     _searchController.dispose();
+    _listScrollController.dispose();
     super.dispose();
   }
 
   void _loadPoems() {
-    final future = AppDatabase.instance.getPoems(
+    final query = _searchController.text;
+    final filteredFuture = AppDatabase.instance.getPoems(
       _collectionId,
-      query: _searchController.text,
+      query: query,
     );
+    final allPoemsFuture = query.trim().isEmpty
+        ? filteredFuture
+        : AppDatabase.instance.getPoems(_collectionId);
+    final loadFuture = Future.wait([filteredFuture, allPoemsFuture]);
+    final future = loadFuture.then((results) => results.first);
     _poemsFuture = future;
-    future.then((poems) {
+    loadFuture.then((results) {
       if (!mounted || _poemsFuture != future) {
         return;
       }
 
+      final poems = results.first;
+      final allPoems = results.last;
       final visibleIds = poems
           .map((poem) => poem.id)
           .whereType<int>()
           .toList(growable: false);
       final visibleIdSet = visibleIds.toSet();
+      final positions = <int, int>{};
+      for (var index = 0; index < allPoems.length; index += 1) {
+        final id = allPoems[index].id;
+        if (id != null) {
+          positions[id] = index + 1;
+        }
+      }
       setState(() {
+        _lastPoems = poems;
+        _hasLoadedPoems = true;
         _visiblePoemIds = visibleIds;
+        _poemPositions = positions;
         _selectedPoemIds.removeWhere((id) => !visibleIdSet.contains(id));
       });
     }).catchError((_) {
@@ -67,6 +90,7 @@ class _PoemListScreenState extends State<PoemListScreen> {
       }
       setState(() {
         _visiblePoemIds = const <int>[];
+        _poemPositions = const <int, int>{};
         _selectedPoemIds.clear();
       });
     });
@@ -123,8 +147,15 @@ class _PoemListScreenState extends State<PoemListScreen> {
     });
   }
 
+  List<int> _selectedPoemIdsInVisibleOrder() {
+    return [
+      for (final id in _visiblePoemIds)
+        if (_selectedPoemIds.contains(id)) id,
+    ];
+  }
+
   void _copySelectedPoems() {
-    final selectedIds = _selectedPoemIds.toList(growable: false);
+    final selectedIds = _selectedPoemIdsInVisibleOrder();
     if (selectedIds.isEmpty) {
       return;
     }
@@ -138,7 +169,7 @@ class _PoemListScreenState extends State<PoemListScreen> {
   }
 
   void _cutSelectedPoems() {
-    final selectedIds = _selectedPoemIds.toList(growable: false);
+    final selectedIds = _selectedPoemIdsInVisibleOrder();
     if (selectedIds.isEmpty) {
       return;
     }
@@ -152,7 +183,7 @@ class _PoemListScreenState extends State<PoemListScreen> {
   }
 
   Future<void> _removeSelectedPoems() async {
-    final selectedIds = _selectedPoemIds.toList(growable: false);
+    final selectedIds = _selectedPoemIdsInVisibleOrder();
     if (selectedIds.isEmpty) {
       return;
     }
@@ -302,6 +333,45 @@ class _PoemListScreenState extends State<PoemListScreen> {
     }
   }
 
+  Future<void> _movePoem(Poem poem, int currentIndex, int totalCount) async {
+    final poemId = poem.id;
+    if (poemId == null || totalCount <= 1) {
+      return;
+    }
+    if (_searchController.text.trim().isNotEmpty) {
+      _showSnackBar('请先清空搜索，再调整诗词位置');
+      return;
+    }
+
+    final targetPosition = await showDialog<int>(
+      context: context,
+      builder: (context) => _MovePoemDialog(
+        initialPosition: currentIndex + 1,
+        totalCount: totalCount,
+      ),
+    );
+    if (targetPosition == null) {
+      return;
+    }
+    if (targetPosition < 1 || targetPosition > totalCount) {
+      _showSnackBar('请输入 1 到 $totalCount 之间的数字');
+      return;
+    }
+
+    await AppDatabase.instance.movePoemInCollection(
+      collectionId: _collectionId,
+      poemId: poemId,
+      targetIndex: targetPosition - 1,
+    );
+    if (!mounted) {
+      return;
+    }
+    await _refreshPoems();
+    if (mounted) {
+      _showSnackBar('已移动到第 $targetPosition 位');
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -334,7 +404,9 @@ class _PoemListScreenState extends State<PoemListScreen> {
               future: _poemsFuture,
               builder: (context, snapshot) {
                 if (snapshot.connectionState == ConnectionState.waiting) {
-                  return const Center(child: CircularProgressIndicator());
+                  if (!_hasLoadedPoems) {
+                    return const Center(child: CircularProgressIndicator());
+                  }
                 }
 
                 if (snapshot.hasError) {
@@ -345,7 +417,10 @@ class _PoemListScreenState extends State<PoemListScreen> {
                   );
                 }
 
-                final poems = snapshot.data ?? const <Poem>[];
+                final poems = snapshot.connectionState ==
+                        ConnectionState.waiting
+                    ? _lastPoems
+                    : (snapshot.data ?? const <Poem>[]);
                 if (poems.isEmpty) {
                   return RefreshIndicator(
                     onRefresh: _refreshPoems,
@@ -367,29 +442,40 @@ class _PoemListScreenState extends State<PoemListScreen> {
                   );
                 }
 
-                return RefreshIndicator(
-                  onRefresh: _refreshPoems,
-                  child: ListView.builder(
-                    padding: const EdgeInsets.only(bottom: 88, top: 4),
-                    itemCount: poems.length,
-                    itemBuilder: (context, index) {
-                      final poem = poems[index];
-                      return _PoemCard(
-                        poem: poem,
-                        selectionMode: _isSelecting,
-                        selected: poem.id != null &&
-                            _selectedPoemIds.contains(poem.id),
-                        onTap: () {
-                          if (_isSelecting) {
-                            _togglePoemSelection(poem);
-                          } else {
-                            _openEditor(poem: poem);
-                          }
-                        },
-                        onLongPress: () => _selectPoem(poem),
-                        onDelete: () => _deletePoem(poem),
-                      );
-                    },
+                return Scrollbar(
+                  controller: _listScrollController,
+                  thumbVisibility: poems.length > 8,
+                  interactive: true,
+                  child: RefreshIndicator(
+                    onRefresh: _refreshPoems,
+                    child: ListView.builder(
+                      controller: _listScrollController,
+                      padding: const EdgeInsets.only(bottom: 88, top: 4),
+                      itemCount: poems.length,
+                      itemBuilder: (context, index) {
+                        final poem = poems[index];
+                        final poemId = poem.id;
+                        return _PoemCard(
+                          poem: poem,
+                          displayIndex: poemId == null
+                              ? index + 1
+                              : (_poemPositions[poemId] ?? index + 1),
+                          selectionMode: _isSelecting,
+                          selected: poemId != null &&
+                              _selectedPoemIds.contains(poemId),
+                          onTap: () {
+                            if (_isSelecting) {
+                              _togglePoemSelection(poem);
+                            } else {
+                              _openEditor(poem: poem);
+                            }
+                          },
+                          onLongPress: () => _selectPoem(poem),
+                          onMove: () => _movePoem(poem, index, poems.length),
+                          onDelete: () => _deletePoem(poem),
+                        );
+                      },
+                    ),
                   ),
                 );
               },
@@ -473,21 +559,85 @@ class _PoemListScreenState extends State<PoemListScreen> {
   }
 }
 
+class _MovePoemDialog extends StatefulWidget {
+  const _MovePoemDialog({
+    required this.initialPosition,
+    required this.totalCount,
+  });
+
+  final int initialPosition;
+  final int totalCount;
+
+  @override
+  State<_MovePoemDialog> createState() => _MovePoemDialogState();
+}
+
+class _MovePoemDialogState extends State<_MovePoemDialog> {
+  late final TextEditingController _controller;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = TextEditingController(text: '${widget.initialPosition}');
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  void _submit() {
+    Navigator.pop(context, int.tryParse(_controller.text.trim()));
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: const Text('调整诗词位置'),
+      content: TextField(
+        controller: _controller,
+        autofocus: true,
+        keyboardType: TextInputType.number,
+        decoration: InputDecoration(
+          labelText: '目标位置',
+          helperText: '请输入 1 到 ${widget.totalCount} 之间的数字',
+        ),
+        onSubmitted: (_) => _submit(),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context),
+          child: const Text('取消'),
+        ),
+        FilledButton(
+          onPressed: _submit,
+          child: const Text('移动'),
+        ),
+      ],
+    );
+  }
+}
+
 class _PoemCard extends StatelessWidget {
   const _PoemCard({
     required this.poem,
+    required this.displayIndex,
     required this.selectionMode,
     required this.selected,
     required this.onTap,
     required this.onLongPress,
+    required this.onMove,
     required this.onDelete,
   });
 
   final Poem poem;
+  final int displayIndex;
   final bool selectionMode;
   final bool selected;
   final VoidCallback onTap;
   final VoidCallback onLongPress;
+  final VoidCallback onMove;
   final VoidCallback onDelete;
 
   @override
@@ -509,8 +659,23 @@ class _PoemCard extends StatelessWidget {
             children: [
               if (selectionMode) ...[
                 Checkbox(value: selected, onChanged: (_) => onTap()),
-                const SizedBox(width: 8),
+                const SizedBox(width: 4),
               ],
+              SizedBox(
+                width: 28,
+                child: Padding(
+                  padding: const EdgeInsets.only(top: 2),
+                  child: Text(
+                    '$displayIndex',
+                    textAlign: TextAlign.center,
+                    style: theme.textTheme.labelLarge?.copyWith(
+                      color: const Color(0xFF8A6A00),
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ),
+              ),
+              const SizedBox(width: 8),
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -573,6 +738,12 @@ class _PoemCard extends StatelessWidget {
               ),
               if (!selectionMode)
                 IconButton(
+                  tooltip: '调整位置',
+                  onPressed: onMove,
+                  icon: const Icon(Icons.low_priority),
+                ),
+              if (!selectionMode)
+                IconButton(
                   tooltip: '从当前诗词库移除',
                   onPressed: onDelete,
                   icon: const Icon(Icons.delete_outline),
@@ -601,7 +772,7 @@ class _PoemClipboard {
     _data = _PoemClipboardData(
       mode: _PoemClipboardMode.copy,
       sourceCollectionId: sourceCollectionId,
-      poemIds: poemIds.toSet().toList(growable: false),
+      poemIds: _uniquePoemIdsInOrder(poemIds),
     );
   }
 
@@ -612,7 +783,7 @@ class _PoemClipboard {
     _data = _PoemClipboardData(
       mode: _PoemClipboardMode.cut,
       sourceCollectionId: sourceCollectionId,
-      poemIds: poemIds.toSet().toList(growable: false),
+      poemIds: _uniquePoemIdsInOrder(poemIds),
     );
   }
 
@@ -631,6 +802,17 @@ class _PoemClipboardData {
   final _PoemClipboardMode mode;
   final int sourceCollectionId;
   final List<int> poemIds;
+}
+
+List<int> _uniquePoemIdsInOrder(Iterable<int> poemIds) {
+  final seen = <int>{};
+  final result = <int>[];
+  for (final poemId in poemIds) {
+    if (seen.add(poemId)) {
+      result.add(poemId);
+    }
+  }
+  return result;
 }
 
 class _PoemMessageView extends StatelessWidget {

@@ -63,9 +63,12 @@ class _HomeScreenState extends State<HomeScreen> {
               },
             ),
             _HomeSection(
-              title: 'API管理',
+              title: '设置',
               icon: Icons.settings_outlined,
               destination: const ApiSettingsScreen(),
+              onReturn: () {
+                _loadJinshiPoints();
+              },
             ),
           ],
         ),

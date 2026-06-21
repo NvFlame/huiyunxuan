@@ -12,6 +12,50 @@ class AppDatabase {
   AppDatabase._();
 
   static final AppDatabase instance = AppDatabase._();
+  static const int schemaVersion = 16;
+  static const List<String> backupTableNames = [
+    'poem_collections',
+    'poem_elements',
+    'collection_poems',
+    'api_configs',
+    'poem_agent_messages',
+    'learning_progress',
+    'training_progress',
+    'training_achievements',
+  ];
+
+  static const List<String> _backupDeleteOrder = [
+    'poem_agent_messages',
+    'learning_progress',
+    'training_progress',
+    'training_achievements',
+    'collection_poems',
+    'api_configs',
+    'poem_collections',
+    'poem_elements',
+  ];
+
+  static const List<String> _backupInsertOrder = [
+    'poem_collections',
+    'poem_elements',
+    'collection_poems',
+    'api_configs',
+    'poem_agent_messages',
+    'learning_progress',
+    'training_progress',
+    'training_achievements',
+  ];
+
+  static const Map<String, String> _backupTableOrderBy = {
+    'poem_collections': 'id ASC',
+    'poem_elements': 'id ASC',
+    'collection_poems': 'collection_id ASC, sort_order ASC, created_at ASC, poem_id ASC',
+    'api_configs': 'id ASC',
+    'poem_agent_messages': 'id ASC',
+    'learning_progress': 'collection_id ASC',
+    'training_progress': 'collection_id ASC',
+    'training_achievements': 'poem_id ASC',
+  };
 
   Database? _database;
 
@@ -32,7 +76,7 @@ class AppDatabase {
 
     return openDatabase(
       path,
-      version: 15,
+      version: schemaVersion,
       onConfigure: (db) async {
         await db.execute('PRAGMA foreign_keys = ON');
       },
@@ -151,6 +195,9 @@ AND search_api_key != ''
         if (oldVersion < 15) {
           await _backfillProsodyMetadata(db);
         }
+        if (oldVersion < 16) {
+          await _ensureCollectionPoemSortOrderColumn(db);
+        }
       },
     );
   }
@@ -234,6 +281,7 @@ CREATE TABLE collection_poems (
   collection_id INTEGER NOT NULL,
   poem_id INTEGER NOT NULL,
   created_at INTEGER NOT NULL,
+  sort_order INTEGER NOT NULL DEFAULT 0,
   PRIMARY KEY (collection_id, poem_id),
   FOREIGN KEY (collection_id)
     REFERENCES poem_collections (id)
@@ -450,10 +498,60 @@ CREATE TABLE IF NOT EXISTS training_achievements (
         'collection_id': collectionId,
         'poem_id': poemId,
         'created_at': createdAt,
+        'sort_order': createdAt,
       });
     }
 
     await db.execute('DROP TABLE poems');
+  }
+
+  Future<void> _ensureCollectionPoemSortOrderColumn(
+    DatabaseExecutor db,
+  ) async {
+    final columns = await db.rawQuery('PRAGMA table_info(collection_poems)');
+    final hasSortOrder = columns.any((column) => column['name'] == 'sort_order');
+    if (!hasSortOrder) {
+      await db.execute(
+        'ALTER TABLE collection_poems '
+        'ADD COLUMN sort_order INTEGER NOT NULL DEFAULT 0',
+      );
+    }
+    await _backfillCollectionPoemSortOrder(db);
+  }
+
+  Future<void> _backfillCollectionPoemSortOrder(DatabaseExecutor db) async {
+    final collectionRows = await db.rawQuery(
+      'SELECT DISTINCT collection_id FROM collection_poems '
+      'ORDER BY collection_id ASC',
+    );
+
+    for (final collectionRow in collectionRows) {
+      final collectionId = collectionRow['collection_id'];
+      if (collectionId is! int) {
+        continue;
+      }
+
+      final rows = await db.query(
+        'collection_poems',
+        columns: ['poem_id'],
+        where: 'collection_id = ?',
+        whereArgs: [collectionId],
+        orderBy: 'sort_order ASC, created_at ASC, poem_id ASC',
+      );
+
+      for (var index = 0; index < rows.length; index += 1) {
+        final poemId = rows[index]['poem_id'];
+        if (poemId is! int) {
+          continue;
+        }
+        await db.update(
+          'collection_poems',
+          {'sort_order': index},
+          where: 'collection_id = ? AND poem_id = ?',
+          whereArgs: [collectionId, poemId],
+        );
+      }
+    }
   }
 
   Future<List<PoemCollection>> getCollections() async {
@@ -744,6 +842,62 @@ WHERE poem_id IN ($placeholders)
     return Sqflite.firstIntValue(rows) ?? 0;
   }
 
+  Future<int> currentDatabaseVersion() async {
+    final db = await database;
+    return db.getVersion();
+  }
+
+  Future<Map<String, List<Map<String, Object?>>>> exportBackupTables() async {
+    final db = await database;
+    final data = <String, List<Map<String, Object?>>>{};
+    for (final tableName in backupTableNames) {
+      data[tableName] = await db.query(
+        tableName,
+        orderBy: _backupTableOrderBy[tableName],
+      );
+    }
+    return data;
+  }
+
+  Future<void> importBackupTables(
+    Map<String, List<Map<String, Object?>>> tables,
+  ) async {
+    final db = await database;
+    final tableColumns = <String, Set<String>>{};
+    for (final tableName in backupTableNames) {
+      final columns = await db.rawQuery('PRAGMA table_info($tableName)');
+      tableColumns[tableName] = {
+        for (final column in columns) column['name'] as String,
+      };
+    }
+
+    await db.transaction((txn) async {
+      for (final tableName in _backupDeleteOrder) {
+        await txn.delete(tableName);
+      }
+
+      for (final tableName in _backupInsertOrder) {
+        final allowedColumns = tableColumns[tableName] ?? const <String>{};
+        final rows = tables[tableName] ?? const <Map<String, Object?>>[];
+        for (final row in rows) {
+          final filteredRow = <String, Object?>{
+            for (final entry in row.entries)
+              if (allowedColumns.contains(entry.key)) entry.key: entry.value,
+          };
+          if (filteredRow.isEmpty) {
+            continue;
+          }
+          await txn.insert(
+            tableName,
+            filteredRow,
+            conflictAlgorithm: ConflictAlgorithm.replace,
+          );
+        }
+      }
+      await _backfillCollectionPoemSortOrder(txn);
+    });
+  }
+
   Future<int> createApiConfig({
     required String name,
     required String apiKey,
@@ -973,7 +1127,7 @@ SELECT pe.*, cp.collection_id
 FROM poem_elements pe
 INNER JOIN collection_poems cp ON cp.poem_id = pe.id
 WHERE cp.collection_id = ?
-ORDER BY cp.created_at ASC, pe.title ASC
+ORDER BY cp.sort_order ASC, cp.created_at ASC, pe.title ASC
 ''',
         [collectionId],
       );
@@ -998,7 +1152,7 @@ AND (
   OR pe.learning_note LIKE ?
   OR pe.appreciation LIKE ?
 )
-ORDER BY cp.created_at ASC, pe.title ASC
+ORDER BY cp.sort_order ASC, cp.created_at ASC, pe.title ASC
 ''',
       [collectionId, like, like, like, like, like, like, like, like, like],
     );
@@ -1014,7 +1168,7 @@ FROM poem_elements pe
 INNER JOIN collection_poems cp ON cp.poem_id = pe.id
 WHERE pe.id = ?
 ${collectionId == null ? '' : 'AND cp.collection_id = ?'}
-ORDER BY cp.created_at ASC
+ORDER BY cp.sort_order ASC, cp.created_at ASC
 LIMIT 1
 ''',
       collectionId == null ? [poemId] : [poemId, collectionId],
@@ -1125,10 +1279,12 @@ LIMIT 1
     final db = await database;
     final id = await db.transaction<int>((txn) async {
       final poemId = await txn.insert('poem_elements', poem.toElementMap());
+      final sortOrder = await _nextCollectionPoemSortOrder(txn, collectionId);
       await txn.insert('collection_poems', {
         'collection_id': collectionId,
         'poem_id': poemId,
         'created_at': createdAt,
+        'sort_order': sortOrder,
       });
       return poemId;
     });
@@ -1171,10 +1327,11 @@ LIMIT 1
   }) async {
     final db = await database;
     final now = DateTime.now().millisecondsSinceEpoch;
-    final uniquePoemIds = poemIds.toSet();
+    final uniquePoemIds = _uniqueIntsInOrder(poemIds);
     final addedPoemIds = <int>[];
 
     await db.transaction((txn) async {
+      var sortOrder = await _nextCollectionPoemSortOrder(txn, collectionId);
       for (final poemId in uniquePoemIds) {
         final poemRows = await txn.query(
           'poem_elements',
@@ -1204,9 +1361,11 @@ LIMIT 1
             'collection_id': collectionId,
             'poem_id': poemId,
             'created_at': now,
+            'sort_order': sortOrder,
           },
         );
         addedPoemIds.add(poemId);
+        sortOrder += 1;
       }
     });
 
@@ -1214,6 +1373,51 @@ LIMIT 1
       await _touchCollection(collectionId);
     }
     return addedPoemIds;
+  }
+
+  Future<void> movePoemInCollection({
+    required int collectionId,
+    required int poemId,
+    required int targetIndex,
+  }) async {
+    final db = await database;
+    var moved = false;
+
+    await db.transaction((txn) async {
+      final rows = await txn.query(
+        'collection_poems',
+        columns: ['poem_id'],
+        where: 'collection_id = ?',
+        whereArgs: [collectionId],
+        orderBy: 'sort_order ASC, created_at ASC, poem_id ASC',
+      );
+      final poemIds = rows
+          .map((row) => row['poem_id'])
+          .whereType<int>()
+          .toList(growable: true);
+      final oldIndex = poemIds.indexOf(poemId);
+      if (oldIndex < 0) {
+        return;
+      }
+
+      poemIds.removeAt(oldIndex);
+      final clampedIndex = targetIndex.clamp(0, poemIds.length).toInt();
+      poemIds.insert(clampedIndex, poemId);
+      moved = oldIndex != clampedIndex;
+
+      for (var index = 0; index < poemIds.length; index += 1) {
+        await txn.update(
+          'collection_poems',
+          {'sort_order': index},
+          where: 'collection_id = ? AND poem_id = ?',
+          whereArgs: [collectionId, poemIds[index]],
+        );
+      }
+    });
+
+    if (moved) {
+      await _touchCollection(collectionId);
+    }
   }
 
   Future<int> removePoemsFromCollection({
@@ -1249,6 +1453,17 @@ LIMIT 1
       where: 'id = ?',
       whereArgs: [collectionId],
     );
+  }
+
+  Future<int> _nextCollectionPoemSortOrder(
+    DatabaseExecutor db,
+    int collectionId,
+  ) async {
+    final rows = await db.rawQuery(
+      'SELECT MAX(sort_order) FROM collection_poems WHERE collection_id = ?',
+      [collectionId],
+    );
+    return (Sqflite.firstIntValue(rows) ?? -1) + 1;
   }
 
   Future<void> _deletePoemIfOrphaned(DatabaseExecutor db, int poemId) async {
@@ -1297,6 +1512,17 @@ String _generatePoemIdentity() {
 
 String _legacyPoemIdentity(int oldId, int createdAt) {
   return 'legacy-$createdAt-$oldId';
+}
+
+List<int> _uniqueIntsInOrder(Iterable<int> values) {
+  final seen = <int>{};
+  final result = <int>[];
+  for (final value in values) {
+    if (seen.add(value)) {
+      result.add(value);
+    }
+  }
+  return result;
 }
 
 int _intFromMap(Object? value) {
