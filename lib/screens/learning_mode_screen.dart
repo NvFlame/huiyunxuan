@@ -57,6 +57,17 @@ class _LearningModeScreenState extends State<LearningModeScreen> {
 
   bool get _canGoPrevious => _currentIndex > 0;
   bool get _canGoNext => _currentIndex < _poems.length - 1;
+
+  int? get _favoritesCollectionId {
+    for (final collection in _collections) {
+      final id = collection.id;
+      if (id != null && collection.isFavorites) {
+        return id;
+      }
+    }
+    return null;
+  }
+
   Set<int> get _favoriteTargetCollectionIds {
     final currentCollectionId = _selectedCollection?.id;
     return {
@@ -71,7 +82,11 @@ class _LearningModeScreenState extends State<LearningModeScreen> {
     return _currentPoemCollectionIds.intersection(_favoriteTargetCollectionIds);
   }
 
-  bool get _isCurrentPoemFavorited => _selectedFavoriteTargetIds.isNotEmpty;
+  bool get _isCurrentPoemFavorited {
+    final favoriteCollectionId = _favoritesCollectionId;
+    return favoriteCollectionId != null &&
+        _currentPoemCollectionIds.contains(favoriteCollectionId);
+  }
 
   @override
   void initState() {

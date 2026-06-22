@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:math';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import '../data/app_database.dart';
 import '../models/poem.dart';
@@ -433,7 +434,7 @@ class _TrainingModeScreenState extends State<TrainingModeScreen> {
     unawaited(_saveCurrentProgress());
   }
 
-  void _commitBlank(int blankId) {
+  void _commitBlank(int blankId, {bool focusNextOnCorrect = false}) {
     final exercise = _exercise;
     final blank = exercise?.blanks[blankId];
     final controller = _controllers[blankId];
@@ -468,6 +469,8 @@ class _TrainingModeScreenState extends State<TrainingModeScreen> {
       });
       if (exercise.allCorrect) {
         unawaited(_completePassed());
+      } else if (focusNextOnCorrect) {
+        _focusNextPendingBlank(blankId);
       }
       return;
     }
@@ -495,12 +498,72 @@ class _TrainingModeScreenState extends State<TrainingModeScreen> {
 
   void _handleBlankEdited(int blankId) {
     final blank = _exercise?.blanks[blankId];
-    if (blank == null || blank.status != _BlankStatus.incorrect) {
+    final controller = _controllers[blankId];
+    if (blank == null || controller == null) {
+      return;
+    }
+
+    if (blank.characterLimit == 1) {
+      final value = controller.value;
+      if (value.composing.isValid && !value.composing.isCollapsed) {
+        return;
+      }
+      final firstCharacter = _firstInputCharacter(controller.text);
+      if (controller.text != firstCharacter) {
+        controller.value = TextEditingValue(
+          text: firstCharacter,
+          selection: TextSelection.collapsed(offset: firstCharacter.length),
+        );
+      }
+      if (firstCharacter.isNotEmpty) {
+        if (_correctionMode == CorrectionMode.instant) {
+          _commitBlank(blankId, focusNextOnCorrect: true);
+        } else {
+          _focusNextPendingBlank(blankId);
+        }
+      } else if (blank.status == _BlankStatus.incorrect) {
+        setState(() {
+          blank.status = _BlankStatus.pending;
+          blank.wrongText = '';
+        });
+      }
+      return;
+    }
+
+    if (blank.status != _BlankStatus.incorrect) {
       return;
     }
     setState(() {
       blank.status = _BlankStatus.pending;
       blank.wrongText = '';
+    });
+  }
+
+  void _focusNextPendingBlank(int currentBlankId) {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      final exercise = _exercise;
+      if (!mounted ||
+          exercise == null ||
+          _phase != _TrainingPhase.answering) {
+        return;
+      }
+      final ids = exercise.blanks.keys.toList()..sort();
+      for (final id in ids) {
+        if (id <= currentBlankId) {
+          continue;
+        }
+        final blank = exercise.blanks[id];
+        if (blank == null || blank.status == _BlankStatus.correct) {
+          continue;
+        }
+        final text = _controllers[id]?.text.trim() ?? '';
+        if (text.isNotEmpty) {
+          continue;
+        }
+        _focusNodes[id]?.requestFocus();
+        return;
+      }
+      FocusScope.of(context).unfocus();
     });
   }
 
@@ -1608,6 +1671,12 @@ class _AnswerBlank extends StatelessWidget {
         focusNode: focusNode,
         textAlign: TextAlign.center,
         textInputAction: TextInputAction.done,
+        keyboardType: TextInputType.text,
+        autocorrect: false,
+        enableSuggestions: false,
+        enableIMEPersonalizedLearning: false,
+        smartDashesType: SmartDashesType.disabled,
+        smartQuotesType: SmartQuotesType.disabled,
         style: theme.textTheme.titleMedium?.copyWith(
           color: isWrong ? Colors.red.shade700 : const Color(0xFF2F2510),
           fontWeight: FontWeight.w600,
@@ -1638,6 +1707,9 @@ class _AnswerBlank extends StatelessWidget {
   }
 
   double _blankWidth(String text) {
+    if (blank.characterLimit == 1) {
+      return 30;
+    }
     final length = _normalizeAnswer(text).length;
     final width = 24 + length * 18.0;
     return width.clamp(58, 260).toDouble();
@@ -2038,11 +2110,13 @@ class _TrainingBlank {
     required this.id,
     required this.answer,
     required this.revealText,
+    this.characterLimit,
   });
 
   final int id;
   final String answer;
   final String revealText;
+  final int? characterLimit;
   _BlankStatus status = _BlankStatus.pending;
   String wrongText = '';
 }
@@ -2236,7 +2310,7 @@ _TrainingExercise _buildJinshiExercise(List<String> lines) {
 
   for (final line in lines) {
     final tokens = <_TrainingToken>[];
-    nextBlankId = _appendBlankedLineTokens(
+    nextBlankId = _appendJinshiLineTokens(
       line: line,
       tokens: tokens,
       blanks: blanks,
@@ -2246,6 +2320,32 @@ _TrainingExercise _buildJinshiExercise(List<String> lines) {
   }
 
   return _TrainingExercise(lines: trainingLines, blanks: blanks);
+}
+
+int _appendJinshiLineTokens({
+  required String line,
+  required List<_TrainingToken> tokens,
+  required Map<int, _TrainingBlank> blanks,
+  required int nextBlankId,
+}) {
+  for (final char in _charactersOf(line)) {
+    if (_isPunctuation(char) || char.trim().isEmpty) {
+      tokens.add(_TrainingToken.text(char));
+      continue;
+    }
+
+    final blank = _TrainingBlank(
+      id: nextBlankId,
+      answer: char,
+      revealText: char,
+      characterLimit: 1,
+    );
+    blanks[nextBlankId] = blank;
+    tokens.add(_TrainingToken.blank(nextBlankId));
+    nextBlankId += 1;
+  }
+
+  return nextBlankId;
 }
 
 int _appendBlankedLineTokens({
@@ -2331,6 +2431,11 @@ String _normalizeAnswer(String value) {
     }
   }
   return buffer.toString();
+}
+
+String _firstInputCharacter(String value) {
+  final chars = _charactersOf(value.trim());
+  return chars.isEmpty ? '' : chars.first;
 }
 
 bool _isPunctuation(String char) {
