@@ -69,6 +69,20 @@ class PoemAgentService {
       );
     }
 
+    if (initialResult.type == 'search_batch' &&
+        initialResult.effectiveSearchQueries.length > 1) {
+      return _runBatchSearchWorkers(
+        config: config,
+        latestUserRequest: latestUserRequest,
+        collections: collections,
+        poemsByCollection: poemsByCollection,
+        currentCollection: currentCollection,
+        focusPoem: focusPoem,
+        targetCollectionId: initialResult.collectionId ?? currentCollection?.id,
+        searchQueries: initialResult.effectiveSearchQueries,
+      );
+    }
+
     final searchQueries = initialResult.effectiveSearchQueries.take(5).toList();
     final searchResults = <WebSearchResult>[];
     final sourceLines = <String>[];
@@ -145,6 +159,326 @@ class PoemAgentService {
       );
     }
     return finalResult;
+  }
+
+  Future<PoemAgentResult> _runBatchSearchWorkers({
+    required ApiConfig config,
+    required String latestUserRequest,
+    required List<PoemCollection> collections,
+    required Map<int, List<Poem>> poemsByCollection,
+    required PoemCollection? currentCollection,
+    required Poem? focusPoem,
+    required int? targetCollectionId,
+    required List<String> searchQueries,
+  }) async {
+    final queries = _uniqueNonEmptyStrings(searchQueries).take(30).toList();
+    if (queries.isEmpty) {
+      return const PoemAgentResult(
+        type: 'ask',
+        message: '我还没有拿到要检索的诗词清单，请重新说明要添加哪些诗词。',
+      );
+    }
+
+    final targetCollection = _findCollectionById(collections, targetCollectionId);
+    if (targetCollection == null || targetCollection.id == null) {
+      return const PoemAgentResult(
+        type: 'ask',
+        message: '我还不能确定要添加到哪个诗词库。请说明目标诗词库名称。',
+      );
+    }
+
+    final outcomes = await _runWithConcurrency<String, _BatchWorkerOutcome>(
+      items: queries,
+      concurrency: 3,
+      task: (query) async {
+        try {
+          return await _runSingleBatchWorker(
+            config: config,
+            latestUserRequest: latestUserRequest,
+            collections: collections,
+            poemsByCollection: poemsByCollection,
+            currentCollection: currentCollection,
+            focusPoem: focusPoem,
+            targetCollection: targetCollection,
+            query: query,
+          );
+        } catch (error) {
+          return _BatchWorkerOutcome(
+            query: query,
+            result: PoemAgentResult(
+              type: 'not_found',
+              message: '这一项处理失败：$error',
+              collectionId: targetCollection.id,
+              searchQuery: query,
+              searchQueries: [query],
+            ),
+            sourceLines: const <String>[],
+            searchFailed: false,
+          );
+        }
+      },
+    );
+
+    final drafts = <PoemAgentDraft>[];
+    final successLines = <String>[];
+    final failureLines = <String>[];
+    final warningLines = <String>[];
+    final sourceLines = <String>[];
+    for (final outcome in outcomes) {
+      sourceLines.addAll(outcome.sourceLines);
+      final result = outcome.result;
+      final resultDrafts = <PoemAgentDraft>[
+        if (result.poem != null) result.poem!,
+        ...result.poems,
+      ].where((draft) => draft.isComplete).toList(growable: false);
+
+      if (resultDrafts.isEmpty) {
+        final reason = result.message.trim().isEmpty
+            ? '未能整理出可入库内容。'
+            : result.message.trim();
+        failureLines.add('- ${outcome.query}：$reason');
+        continue;
+      }
+
+      for (final draft in resultDrafts) {
+        drafts.add(draft);
+        successLines.add('- 《${draft.title}》');
+      }
+      if (outcome.searchFailed) {
+        warningLines.add(
+          '- ${outcome.query}：联网搜索失败，已改由模型知识尝试整理；请入库后重点核对。',
+        );
+      }
+    }
+
+    final summary = StringBuffer()
+      ..writeln('批量添加任务完成：成功整理 ${drafts.length} 首，未完成 ${failureLines.length} 项。');
+    if (successLines.isNotEmpty) {
+      summary
+        ..writeln()
+        ..writeln('可入库：')
+        ..write(successLines.join('\n'));
+    }
+    if (failureLines.isNotEmpty) {
+      summary
+        ..writeln()
+        ..writeln()
+        ..writeln('未完成：')
+        ..write(failureLines.join('\n'));
+    }
+    if (warningLines.isNotEmpty) {
+      summary
+        ..writeln()
+        ..writeln()
+        ..writeln('需核对：')
+        ..write(warningLines.join('\n'));
+    }
+
+    if (drafts.isEmpty) {
+      return PoemAgentResult(
+        type: 'not_found',
+        message: summary.toString().trim(),
+        collectionId: targetCollection.id,
+        searchQueries: queries,
+        searchSources: List.unmodifiable(_uniqueNonEmptyStrings(sourceLines)),
+      );
+    }
+
+    return PoemAgentResult(
+      type: 'add_poems',
+      message: summary.toString().trim(),
+      collectionId: targetCollection.id,
+      poems: List.unmodifiable(drafts),
+      searchQueries: queries,
+      searchSources: List.unmodifiable(_uniqueNonEmptyStrings(sourceLines)),
+    );
+  }
+
+  Future<_BatchWorkerOutcome> _runSingleBatchWorker({
+    required ApiConfig config,
+    required String latestUserRequest,
+    required List<PoemCollection> collections,
+    required Map<int, List<Poem>> poemsByCollection,
+    required PoemCollection? currentCollection,
+    required Poem? focusPoem,
+    required PoemCollection targetCollection,
+    required String query,
+  }) async {
+    WebSearchResult? searchResult;
+    String? searchError;
+    try {
+      searchResult = await searchService.search(
+        config: config,
+        query: query,
+      );
+    } catch (error) {
+      searchError = error.toString();
+    }
+
+    final prompt = _buildBatchWorkerPrompt(
+      latestUserRequest: latestUserRequest,
+      collections: collections,
+      poemsByCollection: poemsByCollection,
+      currentCollection: currentCollection,
+      focusPoem: focusPoem,
+      targetCollection: targetCollection,
+      query: query,
+      searchResult: searchResult,
+      searchError: searchError,
+    );
+    final content = await _createStrictAgentCompletion(
+      config: config,
+      messages: [
+        {
+          'role': 'system',
+          'content': prompt,
+        },
+      ],
+      latestUserRequest: latestUserRequest,
+      hasSearchResults: true,
+    );
+
+    var result = PoemAgentResult.fromJsonText(
+      content,
+      currentCollectionId: targetCollection.id,
+      searchQuery: query,
+      searchQueries: [query],
+      searchSources: searchResult?.sourceLines ?? const <String>[],
+    );
+    if (result.shouldSearch) {
+      result = PoemAgentResult(
+        type: 'ask',
+        message: '这一首仍需要进一步限定或可靠资料，暂未整理入库。',
+        collectionId: targetCollection.id,
+        searchQuery: query,
+        searchQueries: [query],
+        searchSources: searchResult?.sourceLines ?? const <String>[],
+      );
+    }
+
+    return _BatchWorkerOutcome(
+      query: query,
+      result: result,
+      sourceLines: [
+        if (searchError != null) '联网搜索失败：$query：$searchError',
+        ...?searchResult?.sourceLines,
+      ],
+      searchFailed: searchError != null ||
+          searchResult == null ||
+          searchResult.isEmpty,
+    );
+  }
+
+  String _buildBatchWorkerPrompt({
+    required String latestUserRequest,
+    required List<PoemCollection> collections,
+    required Map<int, List<Poem>> poemsByCollection,
+    required PoemCollection? currentCollection,
+    required Poem? focusPoem,
+    required PoemCollection targetCollection,
+    required String query,
+    required WebSearchResult? searchResult,
+    required String? searchError,
+  }) {
+    final poemLines = _buildPoemLines(
+      collections: collections,
+      poemsByCollection: poemsByCollection,
+      currentCollection: currentCollection,
+    );
+    final focusPoemBlock = _buildFocusPoemBlock(focusPoem);
+    final searchBlock = searchResult == null
+        ? '本任务联网搜索失败：${searchError ?? '未知错误'}。你可以改用模型自身知识尝试整理；只有在能可靠给出完整原文、译文、注释和赏析时才返回 add_poem，否则返回 not_found 或 ask。'
+        : searchResult.isEmpty
+            ? '本任务联网搜索没有返回可用结果。你可以改用模型自身知识尝试整理；只有在能可靠给出完整原文、译文、注释和赏析时才返回 add_poem，否则返回 not_found 或 ask。'
+            : searchResult.toPromptText();
+
+    return '''
+你是“绘云轩”批量添加流程中的单首诗词 worker。你只负责下面这个 query 对应的一首诗词，不得处理其它诗词，也不得把其它 query 的搜索结果当作本诗依据。
+
+本轮用户原始请求：
+$latestUserRequest
+
+目标诗词库：id=${targetCollection.id}，名称：${targetCollection.name}
+本 worker 的唯一任务 query：
+$query
+
+当前可编辑诗词清单：
+$poemLines
+
+当前聚焦诗词：
+$focusPoemBlock
+
+本 worker 的检索资料：
+$searchBlock
+
+输出要求：
+1. 只返回一个 JSON 对象，不要 Markdown，不要 JSON 外的文字。
+2. 禁止返回 search 或 search_batch，禁止输出“正在检索”“正在处理”“请稍等”等中间态。
+3. 如果本 query 能唯一确认并可整理出完整内容，返回 add_poem，collection_id 必须是 ${targetCollection.id}。
+4. 如果联网搜索失败但你仍能基于模型知识可靠整理，请在 message 中说明“联网搜索失败，已依据模型知识整理，请核对”。
+5. 如果不能可靠确认完整原文、作者、朝代或目标诗词身份，返回 not_found 或 ask，不要编造。
+6. 不要因为本 query 的资料没有包含其它诗词，就否定其它诗词；你只评价本 query。
+
+add_poem JSON 形如：
+{"type":"add_poem","message":"简短说明","collection_id":${targetCollection.id},"poem":{"title":"标题","author":"作者","dynasty":"朝代","preface":"序或小序，没有则留空","content":"诗词全文，一行一句","remark":"","translation":"译文","annotation":"注释","learning_note":"","appreciation":"赏析"}}
+
+内容规范：
+- content 必须保留逗号、句号、问号、叹号、分号、顿号、冒号等原文标点。
+- 近体诗按一句一行；词、曲等有上下阕时，上下阕之间必须用一个空行分隔。
+- annotation 使用 [行号] 注释内容；标题注释用 [0]；正文行号按 content 的非空原文行计算，不能超过正文非空行数。
+- translation、annotation、appreciation 尽量填写；learning_note 除非用户明确要求，一般留空。
+''';
+  }
+
+  PoemCollection? _findCollectionById(
+    List<PoemCollection> collections,
+    int? collectionId,
+  ) {
+    if (collectionId == null) {
+      return null;
+    }
+    for (final collection in collections) {
+      if (collection.id == collectionId) {
+        return collection;
+      }
+    }
+    return null;
+  }
+
+  Future<List<R>> _runWithConcurrency<T, R>({
+    required List<T> items,
+    required int concurrency,
+    required Future<R> Function(T item) task,
+  }) async {
+    if (items.isEmpty) {
+      return <R>[];
+    }
+    final results = List<R?>.filled(items.length, null);
+    var nextIndex = 0;
+    final workerCount = concurrency < items.length ? concurrency : items.length;
+
+    Future<void> runWorker() async {
+      while (true) {
+        final index = nextIndex;
+        if (index >= items.length) {
+          return;
+        }
+        nextIndex += 1;
+        results[index] = await task(items[index]);
+      }
+    }
+
+    await Future.wait([
+      for (var index = 0; index < workerCount; index += 1) runWorker(),
+    ]);
+
+    final completed = <R>[];
+    for (final result in results) {
+      if (result != null) {
+        completed.add(result);
+      }
+    }
+    return completed;
   }
 
   Future<String> _createStrictAgentCompletion({
@@ -311,7 +645,7 @@ JSON 格式只能是以下八类之一：
 {"type":"search","message":"我需要先联网核验","query":"作者 标题 全文 译文 注释 赏析"}
 
 3. 需要批量联网搜索：
-{"type":"search_batch","message":"我需要分别核验这些诗词","queries":["作者A 标题A 首句A 全文 译文 注释 赏析","作者B 标题B 首句B 全文 译文 注释 赏析"]}
+{"type":"search_batch","message":"我需要分别核验这些诗词","collection_id":1,"queries":["作者A 标题A 首句A 全文 译文 注释 赏析","作者B 标题B 首句B 全文 译文 注释 赏析"]}
 
 4. 可以添加诗词：
 {"type":"add_poem","message":"简短说明","collection_id":1,"poem":{"title":"标题","author":"作者","dynasty":"朝代","preface":"序或小序，没有则留空","content":"诗词全文，一行一句","remark":"","translation":"译文","annotation":"注释","learning_note":"","appreciation":"赏析"}}
@@ -333,6 +667,7 @@ JSON 格式只能是以下八类之一：
 规则：
 - search/search_batch 只能在联网搜索已启用且本轮没有搜索结果时返回；一旦已有搜索结果，不得再次返回 search 或 search_batch。
 - search.query 应包含作者、标题、首句、全文、译文、注释、赏析等能帮助检索的关键词。
+- search/search_batch 如果目标诗词库已经明确，必须带 collection_id；当前在某个诗词库内部时，默认使用当前库 id。
 - 一次添加多首诗时，必须优先返回 search_batch，每首诗一个 query；不要把多首诗挤进同一个 query。每个 query 都要包含该诗自己的作者、标题、首句或用户提供的识别短语。
 - 如果用户提供了首句、长题片段或别名，search.query 必须原样包含这些短语；不要把用户给出的首句省略掉，也不要只用简称搜索。
 - 如果上一轮是一次添加多首诗词的未完成任务，而本轮用户只是澄清其中一首、说“选择……”“先添加……”“继续添加……”，必须把本轮视为同一批量任务的继续；除非用户明确说“只添加这一首”“取消其它”，不要把其它待添加诗词视为取消。
@@ -591,6 +926,20 @@ $relations
         ].join('\n'),
     ].join('\n\n');
   }
+}
+
+class _BatchWorkerOutcome {
+  const _BatchWorkerOutcome({
+    required this.query,
+    required this.result,
+    required this.sourceLines,
+    required this.searchFailed,
+  });
+
+  final String query;
+  final PoemAgentResult result;
+  final List<String> sourceLines;
+  final bool searchFailed;
 }
 
 class PoemAgentMessage {

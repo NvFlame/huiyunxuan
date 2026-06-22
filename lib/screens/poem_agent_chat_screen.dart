@@ -417,6 +417,10 @@ class _PoemAgentChatScreenState extends State<PoemAgentChatScreen> {
     );
     final prosodyCalibrationMessage =
         await _autoCalibrateProsody(poemId, collectionId);
+    final verificationWarning = await _verifyAddedPoemIds(
+      collectionId: collectionId,
+      titlesById: {poemId: draft.title},
+    );
 
     _changed = true;
     final collectionName = _collections
@@ -433,6 +437,9 @@ class _PoemAgentChatScreenState extends State<PoemAgentChatScreen> {
         : '$message\n\n$warning\n可以稍后让我“重新整理《${draft.title}》的注释”。';
     if (prosodyCalibrationMessage != null) {
       displayMessage = '$displayMessage\n\n$prosodyCalibrationMessage';
+    }
+    if (verificationWarning != null) {
+      displayMessage = '$displayMessage\n\n$verificationWarning';
     }
     _addAssistantMessage(
       _messageWithSources(displayMessage, result.searchSources),
@@ -499,6 +506,7 @@ class _PoemAgentChatScreenState extends State<PoemAgentChatScreen> {
     }
 
     final prosodyCalibrationMessages = <String>[];
+    final createdPoemTitlesById = <int, String>{};
     for (var index = 0; index < drafts.length; index += 1) {
       final draft = drafts[index];
       final annotationCheck = annotationChecks[index];
@@ -515,12 +523,17 @@ class _PoemAgentChatScreenState extends State<PoemAgentChatScreen> {
         learningNote: draft.learningNote,
         appreciation: draft.appreciation,
       );
+      createdPoemTitlesById[poemId] = draft.title;
       final calibrationMessage =
           await _autoCalibrateProsody(poemId, collectionId);
       if (calibrationMessage != null) {
         prosodyCalibrationMessages.add('《${draft.title}》：$calibrationMessage');
       }
     }
+    final verificationWarning = await _verifyAddedPoemIds(
+      collectionId: collectionId,
+      titlesById: createdPoemTitlesById,
+    );
 
     _changed = true;
     final collectionName = _collections
@@ -548,9 +561,36 @@ class _PoemAgentChatScreenState extends State<PoemAgentChatScreen> {
     final calibratedDisplayMessage = prosodyCalibrationMessages.isEmpty
         ? displayMessage
         : '$displayMessage\n\n格律处理：\n${prosodyCalibrationMessages.join('\n')}';
+    final verifiedDisplayMessage = verificationWarning == null
+        ? calibratedDisplayMessage
+        : '$calibratedDisplayMessage\n\n$verificationWarning';
     _addAssistantMessage(
-      _messageWithSources(calibratedDisplayMessage, result.searchSources),
+      _messageWithSources(verifiedDisplayMessage, result.searchSources),
     );
+  }
+
+  Future<String?> _verifyAddedPoemIds({
+    required int collectionId,
+    required Map<int, String> titlesById,
+  }) async {
+    if (titlesById.isEmpty) {
+      return '入库核验未通过：程序没有拿到新诗词的本地 id。';
+    }
+    final poems = await AppDatabase.instance.getPoems(collectionId);
+    final existingIds = poems
+        .map((poem) => poem.id)
+        .whereType<int>()
+        .toSet();
+    final missingTitles = <String>[];
+    for (final entry in titlesById.entries) {
+      if (!existingIds.contains(entry.key)) {
+        missingTitles.add('《${entry.value}》');
+      }
+    }
+    if (missingTitles.isEmpty) {
+      return null;
+    }
+    return '入库核验未通过：${missingTitles.join('、')} 没有出现在目标诗词库中，请重新添加或检查数据库状态。';
   }
 
   Future<String?> _autoCalibrateProsody(int poemId, int collectionId) async {
