@@ -409,7 +409,7 @@ CREATE TABLE collection_poems (
 
   Future<List<Map<String, Object?>>> _loadBuiltInTangPoems() async {
     try {
-      final raw = await rootBundle.loadString('唐诗三百首.json');
+      final raw = await rootBundle.loadString('assets/data/tang_poems_300.json');
       final decoded = jsonDecode(raw);
       final source = decoded is Map
           ? decoded['poems'] ?? decoded['items'] ?? decoded['data']

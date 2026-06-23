@@ -47,52 +47,59 @@ class _HomeScreenState extends State<HomeScreen> {
     return Scaffold(
       appBar: AppBar(title: const Text('绘云轩')),
       body: SafeArea(
-        child: ListView(
-          padding: const EdgeInsets.symmetric(vertical: 16),
+        child: Column(
           children: [
-            _JinshiPointCard(
-              points: _jinshiPoints,
-              onTap: _openJinshiHistory,
-            ),
-            _HomeSection(
-              title: '学文',
-              icon: Icons.menu_book_outlined,
-              destination: const LearningModeScreen(),
-            ),
-            _HomeSection(
-              title: '展才',
-              icon: Icons.edit_note_outlined,
-              destination: const TrainingModeScreen(),
-              onReturn: () {
-                _loadJinshiPoints();
-              },
-            ),
-            _HomeSection(
-              title: '诗词库管理',
-              icon: Icons.folder_outlined,
-              destination: const CollectionListScreen(),
-              onReturn: () {
-                _loadJinshiPoints();
-              },
-            ),
-            _HomeSection(
-              title: '设置',
-              icon: Icons.settings_outlined,
-              destination: const ApiSettingsScreen(),
-              onReturn: () {
-                _loadJinshiPoints();
-              },
-            ),
-            const SizedBox(height: 18),
-            Text(
-              '绘云诗人作品\nBy Cloudweaver Poet',
-              textAlign: TextAlign.center,
-              style: theme.textTheme.bodySmall?.copyWith(
-                color: theme.colorScheme.onSurfaceVariant,
-                height: 1.45,
+            Expanded(
+              child: ListView(
+                padding: const EdgeInsets.symmetric(vertical: 16),
+                children: [
+                  _JinshiPointCard(
+                    points: _jinshiPoints,
+                    onTap: _openJinshiHistory,
+                  ),
+                  _HomeSection(
+                    title: '学文',
+                    icon: Icons.menu_book_outlined,
+                    destination: const LearningModeScreen(),
+                  ),
+                  _HomeSection(
+                    title: '展才',
+                    icon: Icons.edit_note_outlined,
+                    destination: const TrainingModeScreen(),
+                    onReturn: () {
+                      _loadJinshiPoints();
+                    },
+                  ),
+                  _HomeSection(
+                    title: '诗词库管理',
+                    icon: Icons.folder_outlined,
+                    destination: const CollectionListScreen(),
+                    onReturn: () {
+                      _loadJinshiPoints();
+                    },
+                  ),
+                  _HomeSection(
+                    title: '设置',
+                    icon: Icons.settings_outlined,
+                    destination: const ApiSettingsScreen(),
+                    onReturn: () {
+                      _loadJinshiPoints();
+                    },
+                  ),
+                ],
               ),
             ),
-            const SizedBox(height: 8),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 4, 16, 10),
+              child: Text(
+                '绘云诗人作品\nBy Cloudweaver Poet',
+                textAlign: TextAlign.center,
+                style: theme.textTheme.bodySmall?.copyWith(
+                  color: theme.colorScheme.onSurfaceVariant,
+                  height: 1.45,
+                ),
+              ),
+            ),
           ],
         ),
       ),

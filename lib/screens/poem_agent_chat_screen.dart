@@ -53,6 +53,13 @@ class _PoemAgentChatScreenState extends State<PoemAgentChatScreen> {
         : '${widget.currentCollection!.name}助手';
   }
 
+  String get _inputHintText {
+    if (_focusPoem != null) {
+      return '例如：解释前两句，或补充本文赏析。';
+    }
+    return '例如：添加《使至塞上》和《赠汪伦》，或补充《春望》的译文';
+  }
+
   @override
   void initState() {
     super.initState();
@@ -1084,8 +1091,8 @@ class _PoemAgentChatScreenState extends State<PoemAgentChatScreen> {
                         minLines: 1,
                         maxLines: 4,
                         textInputAction: TextInputAction.newline,
-                        decoration: const InputDecoration(
-                          hintText: '例如：添加《使至塞上》和《赠汪伦》，或补充《春望》的译文',
+                        decoration: InputDecoration(
+                          hintText: _inputHintText,
                         ),
                         onSubmitted: (_) => _sendMessage(),
                       ),
