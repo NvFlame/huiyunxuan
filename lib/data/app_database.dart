@@ -1461,6 +1461,19 @@ ORDER BY cp.sort_order ASC, cp.created_at ASC, pe.title ASC
     return rows.map(Poem.fromMap).toList();
   }
 
+  Future<int> getCollectionPoemCount(int collectionId) async {
+    final db = await database;
+    final rows = await db.rawQuery(
+      'SELECT COUNT(*) AS count FROM collection_poems WHERE collection_id = ?',
+      [collectionId],
+    );
+    final value = rows.isEmpty ? null : rows.first['count'];
+    if (value is int) {
+      return value;
+    }
+    return 0;
+  }
+
   Future<Poem?> getPoemById(int poemId, {int? collectionId}) async {
     final db = await database;
     final rows = await db.rawQuery(

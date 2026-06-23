@@ -177,11 +177,10 @@ class _TrainingModeScreenState extends State<TrainingModeScreen> {
         return;
       }
 
-      final lastCollectionId = await database.getLastTrainingCollectionId();
-      final selectedCollection =
-          _findCollectionById(collections, widget.initialCollectionId) ??
-              _findCollectionById(collections, lastCollectionId) ??
-              collections.first;
+      final selectedCollection = await _chooseInitialCollection(
+        database,
+        collections,
+      );
       final loadResult = await _loadCollectionData(
         selectedCollection,
         preferredPoemId: widget.initialPoemId,
@@ -214,6 +213,51 @@ class _TrainingModeScreenState extends State<TrainingModeScreen> {
         _error = error.toString();
       });
     }
+  }
+
+  Future<PoemCollection> _chooseInitialCollection(
+    AppDatabase database,
+    List<PoemCollection> collections,
+  ) async {
+    final explicitCollection =
+        _findCollectionById(collections, widget.initialCollectionId);
+    if (explicitCollection != null) {
+      return explicitCollection;
+    }
+
+    final lastCollection = _findCollectionById(
+      collections,
+      await database.getLastTrainingCollectionId(),
+    );
+    if (lastCollection != null &&
+        await _collectionHasPoems(database, lastCollection)) {
+      return lastCollection;
+    }
+
+    final tangPoems = _findCollectionByName(collections, '唐诗三百首');
+    if (tangPoems != null && await _collectionHasPoems(database, tangPoems)) {
+      return tangPoems;
+    }
+
+    for (final collection in collections) {
+      if (await _collectionHasPoems(database, collection)) {
+        return collection;
+      }
+    }
+
+    return lastCollection ?? tangPoems ?? collections.first;
+  }
+
+  Future<bool> _collectionHasPoems(
+    AppDatabase database,
+    PoemCollection collection,
+  ) async {
+    final id = collection.id;
+    if (id == null) {
+      return false;
+    }
+    final count = await database.getCollectionPoemCount(id);
+    return count > 0;
   }
 
   Future<_LoadedTrainingCollection> _loadCollectionData(
@@ -261,6 +305,18 @@ class _TrainingModeScreenState extends State<TrainingModeScreen> {
     return null;
   }
 
+  PoemCollection? _findCollectionByName(
+    List<PoemCollection> collections,
+    String name,
+  ) {
+    for (final collection in collections) {
+      if (collection.name.trim() == name) {
+        return collection;
+      }
+    }
+    return null;
+  }
+
   Future<void> _switchCollection(int collectionId) async {
     final collection = _findCollectionById(_collections, collectionId);
     if (collection == null || collection.id == _selectedCollection?.id) {
@@ -290,8 +346,12 @@ class _TrainingModeScreenState extends State<TrainingModeScreen> {
         _currentIndex = loadResult.index;
         _achievements = achievements;
         _loading = false;
+        if (loadResult.poems.isEmpty) {
+          _phase = _TrainingPhase.confirm;
+          _trainingSessionStarted = false;
+        }
       });
-      if (shouldAutoStart && mounted) {
+      if (shouldAutoStart && mounted && loadResult.poems.isNotEmpty) {
         _startTraining();
       } else {
         await _saveCurrentProgress();
@@ -441,6 +501,10 @@ class _TrainingModeScreenState extends State<TrainingModeScreen> {
   void _startTraining() {
     final poem = _currentPoem;
     if (poem == null) {
+      setState(() {
+        _trainingSessionStarted = false;
+        _phase = _TrainingPhase.confirm;
+      });
       return;
     }
 
@@ -981,50 +1045,52 @@ class _TrainingModeScreenState extends State<TrainingModeScreen> {
         message: '请先在“诗词库管理”中创建诗词库并添加诗词。',
       );
     }
-    if (_poems.isEmpty) {
-      return const _TrainingMessageView(
-        icon: Icons.menu_book_outlined,
-        title: '当前诗词库为空',
-        message: '可以切换到其它诗词库，或先为当前库添加诗词。',
-      );
-    }
-    if (poem == null) {
-      return const _TrainingMessageView(
-        icon: Icons.error_outline,
-        title: '没有可训练的诗词',
-        message: '请返回后重新进入展才。',
-      );
-    }
-
     switch (_phase) {
       case _TrainingPhase.confirm:
         return _buildConfirmView(poem);
       case _TrainingPhase.answering:
+        if (poem == null) {
+          return const _TrainingMessageView(
+            icon: Icons.menu_book_outlined,
+            title: '当前诗词库为空',
+            message: '请返回设置页切换到其它诗词库。',
+          );
+        }
         return _buildAnsweringView(poem);
       case _TrainingPhase.revealed:
+        if (poem == null) {
+          return const _TrainingMessageView(
+            icon: Icons.menu_book_outlined,
+            title: '当前诗词库为空',
+            message: '请返回设置页切换到其它诗词库。',
+          );
+        }
         return _buildRevealedView(poem);
     }
   }
 
-  Widget _buildConfirmView(Poem poem) {
+  Widget _buildConfirmView(Poem? poem) {
     final collectionId = _selectedCollection?.id;
 
     return ListView(
       padding: const EdgeInsets.fromLTRB(16, 14, 16, 120),
       children: [
-        _TrainingProgressCard(
-          poem: poem,
-          currentIndex: _currentIndex + 1,
-          total: _poems.length,
-          achievementLevel: _currentAchievementLevel,
-          onPrevious: _canGoPrevious
-              ? () => unawaited(_goToIndex(_currentIndex - 1))
-              : null,
-          onNext: _canGoNext
-              ? () => unawaited(_goToIndex(_currentIndex + 1))
-              : null,
-          onSearch: () => unawaited(_showPoemSearch()),
-        ),
+        if (poem == null)
+          _buildEmptyCollectionCard()
+        else
+          _TrainingProgressCard(
+            poem: poem,
+            currentIndex: _currentIndex + 1,
+            total: _poems.length,
+            achievementLevel: _currentAchievementLevel,
+            onPrevious: _canGoPrevious
+                ? () => unawaited(_goToIndex(_currentIndex - 1))
+                : null,
+            onNext: _canGoNext
+                ? () => unawaited(_goToIndex(_currentIndex + 1))
+                : null,
+            onSearch: () => unawaited(_showPoemSearch()),
+          ),
         const SizedBox(height: 12),
         DropdownButtonFormField<int>(
           value: collectionId,
@@ -1088,11 +1154,48 @@ class _TrainingModeScreenState extends State<TrainingModeScreen> {
         ),
         const SizedBox(height: 22),
         FilledButton.icon(
-          onPressed: _startTraining,
+          onPressed: poem == null ? null : _startTraining,
           icon: const Icon(Icons.play_arrow),
           label: const Text('开始训练'),
         ),
       ],
+    );
+  }
+
+  Widget _buildEmptyCollectionCard() {
+    final theme = Theme.of(context);
+    final collectionName = _selectedCollection?.name ?? '当前诗词库';
+    return Card(
+      margin: EdgeInsets.zero,
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Icon(
+              Icons.menu_book_outlined,
+              color: theme.colorScheme.primary,
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    '“$collectionName”暂无诗词',
+                    style: theme.textTheme.titleMedium,
+                  ),
+                  const SizedBox(height: 6),
+                  Text(
+                    '可以在下方切换到其它诗词库，或先为当前库添加诗词。',
+                    style: theme.textTheme.bodyMedium,
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
     );
   }
 
