@@ -13,6 +13,7 @@ import '../widgets/prosody_calibration_dialog.dart';
 import '../widgets/prosody_panel.dart';
 import '../widgets/tone_marked_text.dart';
 import 'poem_agent_chat_screen.dart';
+import 'training_mode_screen.dart';
 
 class LearningModeScreen extends StatefulWidget {
   const LearningModeScreen({super.key});
@@ -736,6 +737,138 @@ class _LearningModeScreenState extends State<LearningModeScreen> {
     });
   }
 
+  Future<void> _openTrainingLauncher() async {
+    final collection = _selectedCollection;
+    final poem = _currentPoem;
+    final collectionId = collection?.id;
+    final poemId = poem?.id;
+    if (collectionId == null || poemId == null || poem == null) {
+      _showSnackBar('当前没有可训练的诗词');
+      return;
+    }
+
+    final options = await showModalBottomSheet<_TrainingLaunchOptions>(
+      context: context,
+      showDragHandle: true,
+      builder: (context) {
+        var difficulty = TrainingDifficulty.xiucai;
+        var correctionMode = CorrectionMode.instant;
+
+        return StatefulBuilder(
+          builder: (context, setSheetState) {
+            final theme = Theme.of(context);
+
+            return SafeArea(
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(20, 8, 20, 20),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text('转入展才', style: theme.textTheme.titleLarge),
+                    const SizedBox(height: 6),
+                    Text(
+                      '${collection?.name ?? "未分类"} · ${poem.title}',
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: theme.textTheme.bodyMedium,
+                    ),
+                    const SizedBox(height: 18),
+                    Text('难度', style: theme.textTheme.titleSmall),
+                    const SizedBox(height: 8),
+                    SizedBox(
+                      width: double.infinity,
+                      child: SegmentedButton<TrainingDifficulty>(
+                        segments: [
+                          for (final item in TrainingDifficulty.values)
+                            ButtonSegment<TrainingDifficulty>(
+                              value: item,
+                              label: Text(item.label),
+                            ),
+                        ],
+                        selected: {difficulty},
+                        onSelectionChanged: (selected) {
+                          setSheetState(() {
+                            difficulty = selected.first;
+                          });
+                        },
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    Text(
+                      difficulty.description,
+                      style: theme.textTheme.bodySmall,
+                    ),
+                    const SizedBox(height: 18),
+                    Text('批改方式', style: theme.textTheme.titleSmall),
+                    const SizedBox(height: 8),
+                    SizedBox(
+                      width: double.infinity,
+                      child: SegmentedButton<CorrectionMode>(
+                        segments: [
+                          for (final item in CorrectionMode.values)
+                            ButtonSegment<CorrectionMode>(
+                              value: item,
+                              label: Text(item.label),
+                            ),
+                        ],
+                        selected: {correctionMode},
+                        onSelectionChanged: (selected) {
+                          setSheetState(() {
+                            correctionMode = selected.first;
+                          });
+                        },
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    Text(
+                      correctionMode.description,
+                      style: theme.textTheme.bodySmall,
+                    ),
+                    const SizedBox(height: 22),
+                    SizedBox(
+                      width: double.infinity,
+                      child: FilledButton.icon(
+                        onPressed: () {
+                          Navigator.pop(
+                            context,
+                            _TrainingLaunchOptions(
+                              difficulty: difficulty,
+                              correctionMode: correctionMode,
+                            ),
+                          );
+                        },
+                        icon: const Icon(Icons.play_arrow),
+                        label: const Text('开始训练'),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            );
+          },
+        );
+      },
+    );
+
+    if (options == null || !mounted) {
+      return;
+    }
+
+    await Navigator.push<void>(
+      context,
+      MaterialPageRoute(
+        builder: (context) => TrainingModeScreen(
+          initialCollectionId: collectionId,
+          initialPoemId: poemId,
+          initialDifficulty: options.difficulty,
+          initialCorrectionMode: options.correctionMode,
+          autoStart: true,
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final collection = _selectedCollection;
@@ -801,10 +934,24 @@ class _LearningModeScreenState extends State<LearningModeScreen> {
       ),
       floatingActionButton: poem == null
           ? null
-          : FloatingActionButton.extended(
-              onPressed: () => _openPoemChat(),
-              icon: const Icon(Icons.smart_toy_outlined),
-              label: const Text('问道'),
+          : Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.end,
+              children: [
+                FloatingActionButton.extended(
+                  heroTag: 'learning-training',
+                  onPressed: _openTrainingLauncher,
+                  icon: const Icon(Icons.school_outlined),
+                  label: const Text('展才'),
+                ),
+                const SizedBox(height: 12),
+                FloatingActionButton.extended(
+                  heroTag: 'learning-chat',
+                  onPressed: () => _openPoemChat(),
+                  icon: const Icon(Icons.smart_toy_outlined),
+                  label: const Text('问道'),
+                ),
+              ],
             ),
     );
   }
@@ -1000,6 +1147,16 @@ class _LoadedCollection {
     }
     return poems[index].id;
   }
+}
+
+class _TrainingLaunchOptions {
+  const _TrainingLaunchOptions({
+    required this.difficulty,
+    required this.correctionMode,
+  });
+
+  final TrainingDifficulty difficulty;
+  final CorrectionMode correctionMode;
 }
 
 class _LearningTitle extends StatelessWidget {

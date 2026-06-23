@@ -199,6 +199,19 @@ const String ciPatternSource = '''
 变体||中仄平平中仄仄。中平中仄仄平平[1]。中仄中平平中仄[2]。中仄[2]。中平中仄仄平平[1]。#中仄中平平仄仄。中仄[3]。中平中仄仄平平[1]。中仄中平平仄仄[4]。中仄[4]。中平中仄仄平平[1]。||
 变体||中仄平平中仄平[1]。中平中仄仄平平[1]。中仄中平平中仄。中仄。中平中仄仄平平[1]。#中仄中平平仄仄。中仄。中平中仄仄平平[1]。中仄中平平仄仄。中仄。中平中仄仄平平[1]。||
 
+<钗头凤/撷芳词/摘红英>
+正体||中平仄[1]。中中仄[1]。仄平中中平中仄[1]。平中仄[2]。中平仄[2]。仄中平中，仄中平仄[2]。{1:仄[2]}。{1:仄[2]}。{1:仄[2]}。#平中仄[1]。中平仄[1]。中平中仄中平仄[1]。平平仄[2]。中平仄[2]。平中平中，仄平平仄[2]。{2:仄[2]}。{2:仄[2]}。{2:仄[2]}。||
+变体||中平仄[1]。中中仄[1]。仄平中中平中仄[1]。仄中平[2]。仄平平[2]。仄中平中，中中平平[2]。{3:平[2]}。{3:平[2]}。{3:平[2]}。#平中仄[1]。中平仄[1]。中平中仄中平仄[1]。仄平平[2]。仄平平[2]。仄中中中，中仄平平[2]。{4:平[2]}。{4:平[2]}。{4:平[2]}。||
+变体||中平仄[1]。中中仄[1]。仄平中中平中仄[1]。平中仄[2]。中平仄[2]。仄仄平中，仄平平仄[2]。#平中仄[1]。中平仄[1]。中平中仄中平仄[1]。平平仄[2]。中平仄[2]。中中中中，仄平中仄[2]。||
+
+<钗头凤/撷芳词/摘红英>
+正体||中平仄[1]。中中仄[1]。仄平中中平中仄[1]。平中仄[2]。中平仄[2]。仄中平中，仄中平仄[2]。{1:仄[2]}。{1:仄[2]}。{1:仄[2]}。#平中仄[1]。中平仄[1]。中平中仄中平仄[1]。平平仄[2]。中平仄[2]。平中平中，仄平平仄[2]。{2:仄[2]}。{2:仄[2]}。{2:仄[2]}。||
+变体||中平仄[1]。中中仄[1]。仄平中中平中仄[1]。仄中平[2]。仄平平[2]。仄中平中，中中平平[2]。{3:平[2]}。{3:平[2]}。{3:平[2]}。#平中仄[1]。中平仄[1]。中平中仄中平仄[1]。仄平平[2]。仄平平[2]。仄中中中，中仄平平[2]。{4:平[2]}。{4:平[2]}。{4:平[2]}。||
+变体||中平仄[1]。中中仄[1]。仄平中中平中仄[1]。平中仄[2]。中平仄[2]。仄仄平中，仄平平仄[2]。#平中仄[1]。中平仄[1]。中平中仄中平仄[1]。平平仄[2]。中平仄[2]。中中中中，仄平中仄[2]。||
+
+<鹧鸪天/思越人/思佳客/剪朝霞/骊歌一叠/醉梅花>
+正体||中仄平平中仄平[1]。中平中仄仄平平[1]。中平中仄中平仄，中仄平平中仄平[1]。#中中仄，仄平平[1]。中平中仄仄平平[1]。中平中仄平平仄，中仄平平中仄平[1]。||
+
 ''';
 
 class CiPatternCheck {
@@ -214,6 +227,7 @@ class CiPatternCheck {
     required this.summary,
     required this.details,
     required this.lines,
+    this.suppressPanel = false,
   });
 
   final bool applicable;
@@ -227,6 +241,7 @@ class CiPatternCheck {
   final String summary;
   final List<String> details;
   final List<CiPatternLineCheck> lines;
+  final bool suppressPanel;
 }
 
 class CiPatternLineCheck {
@@ -313,7 +328,44 @@ CiPatternCheck checkCiPattern(Poem poem) {
   }
   matches.sort();
   final best = matches.first;
+  if (_shouldSuppressLikelyNonCi(tune, best)) {
+    return CiPatternCheck(
+      applicable: false,
+      supportedPattern: false,
+      unresolved: false,
+      ok: false,
+      tuneName: tune.primaryName,
+      variantLabel: '',
+      displayForm: '',
+      primaryRhyme: '',
+      summary: '当前作品暂不进行词谱审查。',
+      details: const <String>[],
+      lines: const <CiPatternLineCheck>[],
+      suppressPanel: true,
+    );
+  }
   return best.toCheck();
+}
+
+bool _shouldSuppressLikelyNonCi(_CiTunePattern tune, _CiVariantMatch match) {
+  if (match.errorCount <= 8) {
+    return false;
+  }
+  const suppressibleTuneNames = {
+    '长相思',
+    '长相思令',
+    '相思令',
+    '吴山青',
+    '山渐青',
+    '青山相送迎',
+    '浪淘沙',
+    '浪淘沙令',
+    '曲入冥',
+    '卖花声',
+    '过龙门',
+    '炼丹砂',
+  };
+  return tune.names.any(suppressibleTuneNames.contains);
 }
 
 bool hasCiPatternForTune(String tuneName) {

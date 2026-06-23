@@ -38,6 +38,9 @@ class ProsodyPanel extends StatelessWidget {
     final rhymeAnalysis = analyzeRhyme(poem);
     final regulatedCheck = checkRegulatedVerse(poem);
     final ciCheck = checkCiPattern(poem);
+    if (ciCheck.suppressPanel) {
+      return const SizedBox.shrink();
+    }
     final isRegulatedVerse =
         poem.prosodySystem == Poem.prosodySystemRegulatedVerse;
     final isCi = poem.prosodySystem == Poem.prosodySystemCi;

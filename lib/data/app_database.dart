@@ -1,5 +1,7 @@
+import 'dart:convert';
 import 'dart:math';
 
+import 'package:flutter/services.dart';
 import 'package:path/path.dart' as p;
 import 'package:sqflite/sqflite.dart';
 
@@ -8,11 +10,21 @@ import '../models/poem.dart';
 import '../models/poem_collection.dart';
 import '../services/prosody_service.dart';
 
+class JinshiAchievementEntry {
+  const JinshiAchievementEntry({
+    required this.poem,
+    required this.firstJinshiAt,
+  });
+
+  final Poem poem;
+  final DateTime firstJinshiAt;
+}
+
 class AppDatabase {
   AppDatabase._();
 
   static final AppDatabase instance = AppDatabase._();
-  static const int schemaVersion = 16;
+  static const int schemaVersion = 17;
   static const List<String> backupTableNames = [
     'poem_collections',
     'poem_elements',
@@ -97,6 +109,7 @@ CREATE TABLE poem_collections (
         await _createPoemAgentMessageTable(db);
         await _createLearningProgressTable(db);
         await _createTrainingTables(db);
+        await _ensureBuiltInCollections(db);
       },
       onUpgrade: (db, oldVersion, newVersion) async {
         if (oldVersion < 2) {
@@ -197,6 +210,9 @@ AND search_api_key != ''
         }
         if (oldVersion < 16) {
           await _ensureCollectionPoemSortOrderColumn(db);
+        }
+        if (oldVersion < 17) {
+          await _ensureBuiltInCollections(db);
         }
       },
     );
@@ -306,6 +322,268 @@ CREATE TABLE collection_poems (
     await db.execute(
       'CREATE INDEX idx_poem_elements_author ON poem_elements(author)',
     );
+  }
+
+  Future<void> _ensureBuiltInCollections(DatabaseExecutor db) async {
+    await _ensureTangPoemsCollection(db);
+    await _ensureFavoritesCollection(db);
+  }
+
+  Future<void> _ensureFavoritesCollection(DatabaseExecutor db) async {
+    final favoriteRows = await db.query(
+      'poem_collections',
+      columns: ['id'],
+      where: 'is_favorites = ?',
+      whereArgs: [1],
+      limit: 1,
+    );
+    if (favoriteRows.isNotEmpty) {
+      return;
+    }
+
+    final namedRows = await db.query(
+      'poem_collections',
+      columns: ['id'],
+      where: 'name = ?',
+      whereArgs: ['收藏夹'],
+      limit: 1,
+    );
+    final now = DateTime.now().millisecondsSinceEpoch;
+    if (namedRows.isNotEmpty) {
+      final id = namedRows.first['id'];
+      if (id is int) {
+        await db.update(
+          'poem_collections',
+          {
+            'is_favorites': 1,
+            'updated_at': now,
+          },
+          where: 'id = ?',
+          whereArgs: [id],
+        );
+      }
+      return;
+    }
+
+    await db.insert('poem_collections', {
+      'name': '收藏夹',
+      'description': '收藏的诗词',
+      'is_favorites': 1,
+      'created_at': now,
+      'updated_at': now,
+    });
+  }
+
+  Future<void> _ensureTangPoemsCollection(DatabaseExecutor db) async {
+    final existingRows = await db.query(
+      'poem_collections',
+      columns: ['id'],
+      where: 'name = ?',
+      whereArgs: ['唐诗三百首'],
+      limit: 1,
+    );
+    if (existingRows.isNotEmpty) {
+      return;
+    }
+
+    final seedPoems = await _loadBuiltInTangPoems();
+    if (seedPoems.isEmpty) {
+      return;
+    }
+
+    final now = DateTime.now().millisecondsSinceEpoch;
+    final collectionId = await db.insert('poem_collections', {
+      'name': '唐诗三百首',
+      'description': '蘅塘退士',
+      'is_favorites': 0,
+      'created_at': now,
+      'updated_at': now,
+    });
+
+    var sortOrder = 0;
+    for (final data in seedPoems) {
+      await _insertSeedPoem(db, collectionId, data, sortOrder);
+      sortOrder += 1;
+    }
+  }
+
+  Future<List<Map<String, Object?>>> _loadBuiltInTangPoems() async {
+    try {
+      final raw = await rootBundle.loadString('唐诗三百首.json');
+      final decoded = jsonDecode(raw);
+      final source = decoded is Map
+          ? decoded['poems'] ?? decoded['items'] ?? decoded['data']
+          : decoded;
+      if (source is! List) {
+        return const <Map<String, Object?>>[];
+      }
+      return [
+        for (final item in source)
+          if (item is Map)
+            item.map((key, value) => MapEntry(key.toString(), value)),
+      ];
+    } catch (_) {
+      return const <Map<String, Object?>>[];
+    }
+  }
+
+  Future<void> _insertSeedPoem(
+    DatabaseExecutor db,
+    int collectionId,
+    Map<String, Object?> data,
+    int sortOrder,
+  ) async {
+    final now = DateTime.now();
+    final inferredProsody = inferProsodyMetadata(
+      title: _seedString(data['title']),
+      dynasty: _seedString(data['dynasty']),
+      content: _seedString(data['content']),
+      remark: _seedString(data['remark']),
+    );
+    final prosodySystem = _seedProsodyString(data, ['system']);
+    final prosodyForm = _seedProsodyString(data, ['form', 'prosody_form']);
+    final prosodyRhymeBook = _seedProsodyString(
+      data,
+      ['rhyme_book', 'prosody_rhyme_book'],
+    );
+    final prosodyNote = _seedProsodyString(data, ['note', 'prosody_note']);
+    final prosodyOverrides = _seedProsodyString(
+      data,
+      ['overrides', 'prosody_overrides_json'],
+    );
+    final prosodyVerifiedBy = _seedProsodyString(
+      data,
+      ['verified_by', 'prosody_verified_by'],
+    );
+    final prosodyVerifiedAt = _seedDate(
+      _seedProsodyValue(data, 'verified_at') ??
+          _seedProsodyValue(data, 'prosody_verified_at'),
+    );
+    final hasProsodyMetadata = prosodySystem.isNotEmpty ||
+        prosodyForm.isNotEmpty ||
+        prosodyRhymeBook.isNotEmpty ||
+        prosodyOverrides.isNotEmpty ||
+        prosodyVerifiedAt != null ||
+        prosodyVerifiedBy.isNotEmpty;
+    final resolvedSystem =
+        prosodySystem.isEmpty ? inferredProsody.system : prosodySystem;
+    final resolvedSupported = _seedBool(
+          _seedProsodyValue(data, 'supported') ??
+              _seedProsodyValue(data, 'prosody_supported'),
+        ) ??
+        (hasProsodyMetadata &&
+                resolvedSystem != Poem.prosodySystemUnknown &&
+                resolvedSystem != Poem.prosodySystemUnsupported
+            ? true
+            : inferredProsody.supported);
+    final resolvedEnabled = resolvedSupported &&
+        (_seedBool(
+              _seedProsodyValue(data, 'enabled') ??
+                  _seedProsodyValue(data, 'prosody_enabled'),
+            ) ??
+            (hasProsodyMetadata ? true : inferredProsody.enabled));
+
+    final poem = Poem(
+      collectionId: collectionId,
+      identity: _generatePoemIdentity(),
+      title: _seedString(data['title']),
+      author: _seedString(data['author']),
+      dynasty: _seedString(data['dynasty']),
+      preface: _seedString(data['preface']),
+      content: _seedString(data['content']),
+      remark: _seedString(data['remark']),
+      translation: _seedString(data['translation']),
+      annotation: _seedString(data['annotation']),
+      learningNote: _seedString(
+        data['learning_note'] ?? data['learningNote'],
+      ),
+      appreciation: _seedString(data['appreciation']),
+      prosodySupported: resolvedSupported,
+      prosodyEnabled: resolvedEnabled,
+      prosodySystem: resolvedSystem,
+      prosodyForm: prosodyForm.isEmpty ? inferredProsody.form : prosodyForm,
+      prosodyRhymeBook: prosodyRhymeBook.isEmpty
+          ? inferredProsody.rhymeBook
+          : prosodyRhymeBook,
+      prosodyNote: prosodyNote.isEmpty ? inferredProsody.note : prosodyNote,
+      prosodyOverridesJson: prosodyOverrides,
+      prosodyVerifiedAt: prosodyVerifiedAt,
+      prosodyVerifiedBy: prosodyVerifiedBy,
+      createdAt: now,
+      updatedAt: now,
+    );
+    final poemId = await db.insert('poem_elements', poem.toElementMap());
+    await db.insert('collection_poems', {
+      'collection_id': collectionId,
+      'poem_id': poemId,
+      'created_at': now.millisecondsSinceEpoch,
+      'sort_order': sortOrder,
+    });
+  }
+
+  String _seedString(Object? value) {
+    if (value == null) {
+      return '';
+    }
+    return value.toString().trim();
+  }
+
+  String _seedProsodyString(
+    Map<String, Object?> data,
+    List<String> keys,
+  ) {
+    for (final key in keys) {
+      final value = _seedProsodyValue(data, key);
+      final text = _seedString(value);
+      if (text.isNotEmpty) {
+        return text;
+      }
+    }
+    return '';
+  }
+
+  Object? _seedProsodyValue(Map<String, Object?> data, String key) {
+    final prosody = data['prosody'];
+    if (prosody is Map) {
+      return prosody[key];
+    }
+    return data[key];
+  }
+
+  bool? _seedBool(Object? value) {
+    if (value is bool) {
+      return value;
+    }
+    if (value is int) {
+      return value != 0;
+    }
+    if (value is String) {
+      final normalized = value.trim().toLowerCase();
+      if (normalized == 'true' || normalized == '1') {
+        return true;
+      }
+      if (normalized == 'false' || normalized == '0') {
+        return false;
+      }
+    }
+    return null;
+  }
+
+  DateTime? _seedDate(Object? value) {
+    if (value is int) {
+      if (value <= 0) {
+        return null;
+      }
+      return DateTime.fromMillisecondsSinceEpoch(value);
+    }
+    if (value is String) {
+      final text = value.trim();
+      if (text.isEmpty) {
+        return null;
+      }
+      return DateTime.tryParse(text);
+    }
+    return null;
   }
 
   Future<void> _createLearningProgressTable(DatabaseExecutor db) async {
@@ -840,6 +1118,30 @@ WHERE poem_id IN ($placeholders)
       'SELECT COUNT(*) FROM training_achievements WHERE first_jinshi_at IS NOT NULL',
     );
     return Sqflite.firstIntValue(rows) ?? 0;
+  }
+
+  Future<List<JinshiAchievementEntry>> getJinshiAchievementHistory() async {
+    final db = await database;
+    final rows = await db.rawQuery('''
+SELECT pe.*, COALESCE(MIN(cp.collection_id), 0) AS collection_id,
+  ta.first_jinshi_at AS first_jinshi_at
+FROM training_achievements ta
+INNER JOIN poem_elements pe ON pe.id = ta.poem_id
+LEFT JOIN collection_poems cp ON cp.poem_id = pe.id
+WHERE ta.first_jinshi_at IS NOT NULL
+GROUP BY pe.id
+ORDER BY ta.first_jinshi_at DESC, pe.title ASC
+''');
+
+    return rows.map((row) {
+      final firstJinshiAt = DateTime.fromMillisecondsSinceEpoch(
+        _intFromMap(row['first_jinshi_at']),
+      );
+      return JinshiAchievementEntry(
+        poem: Poem.fromMap(row),
+        firstJinshiAt: firstJinshiAt,
+      );
+    }).toList();
   }
 
   Future<int> currentDatabaseVersion() async {

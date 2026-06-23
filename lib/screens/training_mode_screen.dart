@@ -81,7 +81,20 @@ enum _TrainingPhase { confirm, answering, revealed }
 enum _BlankStatus { pending, correct, incorrect }
 
 class TrainingModeScreen extends StatefulWidget {
-  const TrainingModeScreen({super.key});
+  const TrainingModeScreen({
+    super.key,
+    this.initialCollectionId,
+    this.initialPoemId,
+    this.initialDifficulty = TrainingDifficulty.xiucai,
+    this.initialCorrectionMode = CorrectionMode.instant,
+    this.autoStart = false,
+  });
+
+  final int? initialCollectionId;
+  final int? initialPoemId;
+  final TrainingDifficulty initialDifficulty;
+  final CorrectionMode initialCorrectionMode;
+  final bool autoStart;
 
   @override
   State<TrainingModeScreen> createState() => _TrainingModeScreenState();
@@ -127,10 +140,14 @@ class _TrainingModeScreenState extends State<TrainingModeScreen> {
 
   bool get _canGoPrevious => _currentIndex > 0;
   bool get _canGoNext => _currentIndex < _poems.length - 1;
+  bool get _shouldReturnToConfirmOnBack =>
+      !_loading && _phase != _TrainingPhase.confirm;
 
   @override
   void initState() {
     super.initState();
+    _difficulty = widget.initialDifficulty;
+    _correctionMode = widget.initialCorrectionMode;
     _loadInitialState();
   }
 
@@ -162,9 +179,13 @@ class _TrainingModeScreenState extends State<TrainingModeScreen> {
 
       final lastCollectionId = await database.getLastTrainingCollectionId();
       final selectedCollection =
-          _findCollectionById(collections, lastCollectionId) ??
+          _findCollectionById(collections, widget.initialCollectionId) ??
+              _findCollectionById(collections, lastCollectionId) ??
               collections.first;
-      final loadResult = await _loadCollectionData(selectedCollection);
+      final loadResult = await _loadCollectionData(
+        selectedCollection,
+        preferredPoemId: widget.initialPoemId,
+      );
       final achievements = await _loadAchievements(loadResult.poems);
 
       if (!mounted) {
@@ -179,7 +200,11 @@ class _TrainingModeScreenState extends State<TrainingModeScreen> {
         _loading = false;
         _error = null;
       });
-      await _saveCurrentProgress();
+      if (widget.autoStart && loadResult.poems.isNotEmpty) {
+        _startTraining();
+      } else {
+        await _saveCurrentProgress();
+      }
     } catch (error) {
       if (!mounted) {
         return;
@@ -287,10 +312,6 @@ class _TrainingModeScreenState extends State<TrainingModeScreen> {
       return;
     }
 
-    if (!await _confirmDiscardIfAnswering('切换诗词会放弃本次训练。')) {
-      return;
-    }
-
     final shouldAutoStart = _trainingSessionStarted;
     setState(() {
       _currentIndex = index;
@@ -314,6 +335,28 @@ class _TrainingModeScreenState extends State<TrainingModeScreen> {
       collectionId: collectionId,
       poemId: poemId,
     );
+  }
+
+  Future<bool> _handleBackNavigation() async {
+    if (!_shouldReturnToConfirmOnBack) {
+      return true;
+    }
+    setState(() {
+      _trainingSessionStarted = false;
+      _resetTrainingState(returnToConfirm: true);
+    });
+    if (_scrollController.hasClients) {
+      _scrollController.jumpTo(0);
+    }
+    await _saveCurrentProgress();
+    return false;
+  }
+
+  Future<void> _handleLeadingBackPressed() async {
+    final shouldPop = await _handleBackNavigation();
+    if (shouldPop && mounted) {
+      await Navigator.maybePop(context);
+    }
   }
 
   void _resetTrainingState({required bool returnToConfirm}) {
@@ -475,11 +518,23 @@ class _TrainingModeScreenState extends State<TrainingModeScreen> {
       return;
     }
 
+    _markBlankIncorrect(blank, controller, input);
+  }
+
+  void _markBlankIncorrect(
+    _TrainingBlank blank,
+    TextEditingController controller,
+    String input,
+  ) {
     final token = _attemptToken + 1;
     setState(() {
       _attemptToken = token;
       blank.status = _BlankStatus.incorrect;
       blank.wrongText = input;
+      controller.value = TextEditingValue(
+        text: input,
+        selection: TextSelection.collapsed(offset: input.length),
+      );
     });
     Future<void>.delayed(const Duration(milliseconds: 1300), () {
       if (!mounted ||
@@ -497,36 +552,20 @@ class _TrainingModeScreenState extends State<TrainingModeScreen> {
   }
 
   void _handleBlankEdited(int blankId) {
+    final exercise = _exercise;
     final blank = _exercise?.blanks[blankId];
     final controller = _controllers[blankId];
-    if (blank == null || controller == null) {
+    if (exercise == null || blank == null || controller == null) {
       return;
     }
 
     if (blank.characterLimit == 1) {
-      final value = controller.value;
-      if (value.composing.isValid && !value.composing.isCollapsed) {
-        return;
-      }
-      final firstCharacter = _firstInputCharacter(controller.text);
-      if (controller.text != firstCharacter) {
-        controller.value = TextEditingValue(
-          text: firstCharacter,
-          selection: TextSelection.collapsed(offset: firstCharacter.length),
-        );
-      }
-      if (firstCharacter.isNotEmpty) {
-        if (_correctionMode == CorrectionMode.instant) {
-          _commitBlank(blankId, focusNextOnCorrect: true);
-        } else {
-          _focusNextPendingBlank(blankId);
-        }
-      } else if (blank.status == _BlankStatus.incorrect) {
-        setState(() {
-          blank.status = _BlankStatus.pending;
-          blank.wrongText = '';
-        });
-      }
+      _handleJinshiBlankEdited(
+        exercise: exercise,
+        blankId: blankId,
+        blank: blank,
+        controller: controller,
+      );
       return;
     }
 
@@ -537,6 +576,116 @@ class _TrainingModeScreenState extends State<TrainingModeScreen> {
       blank.status = _BlankStatus.pending;
       blank.wrongText = '';
     });
+  }
+
+  void _handleJinshiBlankEdited({
+    required _TrainingExercise exercise,
+    required int blankId,
+    required _TrainingBlank blank,
+    required TextEditingController controller,
+  }) {
+    final value = controller.value;
+    if (value.composing.isValid && !value.composing.isCollapsed) {
+      return;
+    }
+
+    final inputCharacters = _jinshiInputCharacters(controller.text);
+    if (inputCharacters.isEmpty) {
+      if (controller.text.trim().isNotEmpty) {
+        controller.clear();
+      }
+      if (blank.status == _BlankStatus.incorrect) {
+        setState(() {
+          blank.status = _BlankStatus.pending;
+          blank.wrongText = '';
+        });
+      }
+      return;
+    }
+
+    final blankRun = _jinshiBlankRunFrom(exercise, blankId);
+    if (blankRun.isEmpty) {
+      return;
+    }
+
+    if (_correctionMode == CorrectionMode.finalReview) {
+      final count = min(inputCharacters.length, blankRun.length);
+      var lastFilledBlankId = blankId;
+      setState(() {
+        for (var index = 0; index < count; index += 1) {
+          final targetBlankId = blankRun[index];
+          final targetBlank = exercise.blanks[targetBlankId];
+          final targetController = _controllers[targetBlankId];
+          if (targetBlank == null || targetController == null) {
+            continue;
+          }
+          final input = inputCharacters[index];
+          targetController.value = TextEditingValue(
+            text: input,
+            selection: TextSelection.collapsed(offset: input.length),
+          );
+          if (targetBlank.status == _BlankStatus.incorrect) {
+            targetBlank.status = _BlankStatus.pending;
+            targetBlank.wrongText = '';
+          }
+          lastFilledBlankId = targetBlankId;
+        }
+      });
+      _focusNextPendingBlank(lastFilledBlankId);
+      return;
+    }
+
+    var lastCorrectBlankId = blankId;
+    _TrainingBlank? wrongBlank;
+    TextEditingController? wrongController;
+    String? wrongInput;
+
+    setState(() {
+      final count = min(inputCharacters.length, blankRun.length);
+      for (var index = 0; index < count; index += 1) {
+        final targetBlankId = blankRun[index];
+        final targetBlank = exercise.blanks[targetBlankId];
+        final targetController = _controllers[targetBlankId];
+        if (targetBlank == null || targetController == null) {
+          continue;
+        }
+        if (targetBlank.status == _BlankStatus.correct) {
+          lastCorrectBlankId = targetBlankId;
+          continue;
+        }
+
+        final input = inputCharacters[index];
+        if (_isAnswerCorrect(input, targetBlank.answer)) {
+          targetBlank.status = _BlankStatus.correct;
+          targetBlank.wrongText = '';
+          targetController.clear();
+          lastCorrectBlankId = targetBlankId;
+          continue;
+        }
+
+        wrongBlank = targetBlank;
+        wrongController = targetController;
+        wrongInput = input;
+        break;
+      }
+    });
+
+    final failedBlank = wrongBlank;
+    final failedController = wrongController;
+    final failedInput = wrongInput;
+    if (failedBlank != null &&
+        failedController != null &&
+        failedInput != null) {
+      _markBlankIncorrect(failedBlank, failedController, failedInput);
+      _focusNodes[failedBlank.id]?.requestFocus();
+      return;
+    }
+
+    if (exercise.allCorrect) {
+      unawaited(_completePassed());
+    } else {
+      _focusNextPendingBlank(lastCorrectBlankId);
+    }
   }
 
   void _focusNextPendingBlank(int currentBlankId) {
@@ -745,64 +894,72 @@ class _TrainingModeScreenState extends State<TrainingModeScreen> {
     final poem = _currentPoem;
     final collection = _selectedCollection;
 
-    return Scaffold(
-      appBar: AppBar(
-        title: _TrainingTitle(
-          collection: collection,
-          currentIndex: _poems.isEmpty ? 0 : _currentIndex + 1,
-          total: _poems.length,
-          onTapProgress: _poems.isEmpty ? null : _showJumpDialog,
-        ),
-        actions: [
-          if (_phase != _TrainingPhase.confirm) ...[
-            PopupMenuButton<TrainingDifficulty>(
-              tooltip: '切换难度',
-              initialValue: _difficulty,
-              icon: const Icon(Icons.school_outlined),
-              onSelected: (value) => unawaited(_setDifficulty(value)),
-              itemBuilder: (context) {
-                return [
-                  for (final difficulty in TrainingDifficulty.values)
-                    PopupMenuItem<TrainingDifficulty>(
-                      value: difficulty,
-                      child: Text(difficulty.label),
-                    ),
-                ];
-              },
-            ),
-            PopupMenuButton<CorrectionMode>(
-              tooltip: '切换批改方式',
-              initialValue: _correctionMode,
-              icon: const Icon(Icons.fact_check_outlined),
-              onSelected: (value) => unawaited(_setCorrectionMode(value)),
-              itemBuilder: (context) {
-                return [
-                  for (final mode in CorrectionMode.values)
-                    PopupMenuItem<CorrectionMode>(
-                      value: mode,
-                      child: Text(mode.label),
-                    ),
-                ];
-              },
+    return WillPopScope(
+      onWillPop: _handleBackNavigation,
+      child: Scaffold(
+        appBar: AppBar(
+          leading: Navigator.canPop(context)
+              ? BackButton(
+                  onPressed: () => unawaited(_handleLeadingBackPressed()),
+                )
+              : null,
+          title: _TrainingTitle(
+            collection: collection,
+            currentIndex: _poems.isEmpty ? 0 : _currentIndex + 1,
+            total: _poems.length,
+            onTapProgress: _poems.isEmpty ? null : _showJumpDialog,
+          ),
+          actions: [
+            if (_phase != _TrainingPhase.confirm) ...[
+              PopupMenuButton<TrainingDifficulty>(
+                tooltip: '切换难度',
+                initialValue: _difficulty,
+                icon: const Icon(Icons.school_outlined),
+                onSelected: (value) => unawaited(_setDifficulty(value)),
+                itemBuilder: (context) {
+                  return [
+                    for (final difficulty in TrainingDifficulty.values)
+                      PopupMenuItem<TrainingDifficulty>(
+                        value: difficulty,
+                        child: Text(difficulty.label),
+                      ),
+                  ];
+                },
+              ),
+              PopupMenuButton<CorrectionMode>(
+                tooltip: '切换批改方式',
+                initialValue: _correctionMode,
+                icon: const Icon(Icons.fact_check_outlined),
+                onSelected: (value) => unawaited(_setCorrectionMode(value)),
+                itemBuilder: (context) {
+                  return [
+                    for (final mode in CorrectionMode.values)
+                      PopupMenuItem<CorrectionMode>(
+                        value: mode,
+                        child: Text(mode.label),
+                      ),
+                  ];
+                },
+              ),
+            ],
+            IconButton(
+              tooltip: '搜索诗词',
+              onPressed:
+                  _poems.isEmpty ? null : () => unawaited(_showPoemSearch()),
+              icon: const Icon(Icons.search),
             ),
           ],
-          IconButton(
-            tooltip: '搜索诗词',
-            onPressed:
-                _poems.isEmpty ? null : () => unawaited(_showPoemSearch()),
-            icon: const Icon(Icons.search),
-          ),
-        ],
+        ),
+        body: SafeArea(child: _buildBody(poem)),
+        floatingActionButton: _phase == _TrainingPhase.revealed && poem != null
+            ? FloatingActionButton.extended(
+                onPressed: () => unawaited(_openPoemChat()),
+                icon: const Icon(Icons.smart_toy_outlined),
+                label: const Text('问道'),
+              )
+            : null,
+        bottomNavigationBar: _buildBottomBar(),
       ),
-      body: SafeArea(child: _buildBody(poem)),
-      floatingActionButton: _phase == _TrainingPhase.revealed && poem != null
-          ? FloatingActionButton.extended(
-              onPressed: () => unawaited(_openPoemChat()),
-              icon: const Icon(Icons.smart_toy_outlined),
-              label: const Text('问道'),
-            )
-          : null,
-      bottomNavigationBar: _buildBottomBar(),
     );
   }
 
@@ -1672,11 +1829,6 @@ class _AnswerBlank extends StatelessWidget {
         textAlign: TextAlign.center,
         textInputAction: TextInputAction.done,
         keyboardType: TextInputType.text,
-        autocorrect: false,
-        enableSuggestions: false,
-        enableIMEPersonalizedLearning: false,
-        smartDashesType: SmartDashesType.disabled,
-        smartQuotesType: SmartQuotesType.disabled,
         style: theme.textTheme.titleMedium?.copyWith(
           color: isWrong ? Colors.red.shade700 : const Color(0xFF2F2510),
           fontWeight: FontWeight.w600,
@@ -2145,6 +2297,37 @@ List<List<_TrainingToken>> _groupExerciseTokens(List<_TrainingToken> tokens) {
   return groups;
 }
 
+List<int> _jinshiBlankRunFrom(_TrainingExercise exercise, int blankId) {
+  for (final line in exercise.lines) {
+    var started = false;
+    final run = <int>[];
+    for (final token in line.tokens) {
+      final tokenBlankId = token.blankId;
+      if (!started) {
+        if (tokenBlankId == blankId) {
+          started = true;
+          run.add(blankId);
+        }
+        continue;
+      }
+
+      if (tokenBlankId != null) {
+        run.add(tokenBlankId);
+        continue;
+      }
+
+      if (token.text.trim().isNotEmpty) {
+        return run;
+      }
+    }
+    if (started) {
+      return run;
+    }
+  }
+
+  return <int>[blankId];
+}
+
 List<String> _splitTextToken(String text) {
   final parts = <String>[];
   final buffer = StringBuffer();
@@ -2433,9 +2616,15 @@ String _normalizeAnswer(String value) {
   return buffer.toString();
 }
 
-String _firstInputCharacter(String value) {
-  final chars = _charactersOf(value.trim());
-  return chars.isEmpty ? '' : chars.first;
+List<String> _jinshiInputCharacters(String value) {
+  final chars = <String>[];
+  for (final char in _charactersOf(value.trim())) {
+    if (_isPunctuation(char) || char.trim().isEmpty) {
+      break;
+    }
+    chars.add(char);
+  }
+  return chars;
 }
 
 bool _isPunctuation(String char) {

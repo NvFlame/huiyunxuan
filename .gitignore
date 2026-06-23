@@ -42,6 +42,21 @@ tools/*.spec
 
 # Local app backup packages
 *.hyxbak
+*.hyxbak.json
+
+# Local secrets, signing files, and distributable builds
+.env
+.env.*
+*.apk
+*.aab
+*.apks
+*.jks
+*.keystore
+key.properties
+local.properties
+android/key.properties
+android/app/key.properties
+android/local.properties
 
 # Symbolication related
 app.*.symbols
