@@ -755,10 +755,11 @@ class _JinshiDiamond extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final primary = theme.colorScheme.primary;
-    final labelStyle = theme.textTheme.labelLarge?.copyWith(
+    final labelStyle = theme.textTheme.titleMedium?.copyWith(
       color: const Color(0xFF4F3B12),
       fontFamily: kFeiHuaSongTiFontFamily,
       fontWeight: FontWeight.w700,
+      fontSize: 22,
       height: 1.1,
     );
 
@@ -881,7 +882,21 @@ class _JinshiHistoryScreenState extends State<JinshiHistoryScreen> {
     final theme = Theme.of(context);
 
     return Scaffold(
-      appBar: AppBar(title: const Text('进士记录')),
+      appBar: AppBar(
+        title: Text(
+          '进士记录',
+          style: theme.textTheme.headlineSmall?.copyWith(
+                fontFamily: kFeiHuaSongTiFontFamily,
+                fontWeight: FontWeight.w700,
+                color: const Color(0xFF4D3714),
+              ),
+        ),
+        backgroundColor: Colors.transparent,
+        surfaceTintColor: Colors.transparent,
+        shadowColor: Colors.transparent,
+        elevation: 0,
+        scrolledUnderElevation: 0,
+      ),
       body: SafeArea(
         child: FutureBuilder<List<JinshiAchievementEntry>>(
           future: _future,

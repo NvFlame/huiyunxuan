@@ -551,7 +551,13 @@ class _PoemListScreenState extends State<PoemListScreen> {
     }
 
     return AppBar(
-      title: Text(widget.collection.name),
+      title: Text(
+        widget.collection.name,
+        style: const TextStyle(
+          fontFamily: kFeiHuaSongTiFontFamily,
+          fontWeight: FontWeight.w700,
+        ),
+      ),
       actions: [
         if (_PoemClipboard.hasData)
           IconButton(

@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:math' as math;
 
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
@@ -871,64 +872,9 @@ class _LearningModeScreenState extends State<LearningModeScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final collection = _selectedCollection;
     final poem = _currentPoem;
 
     return Scaffold(
-      appBar: AppBar(
-        title: _LearningTitle(
-          collection: collection,
-          currentIndex: _poems.isEmpty ? 0 : _currentIndex + 1,
-          total: _poems.length,
-          onTapProgress: _poems.isEmpty ? null : _showJumpDialog,
-        ),
-        actions: [
-          IconButton(
-            tooltip: _isCurrentPoemFavorited ? '管理收藏' : '收藏',
-            onPressed: _currentPoem == null ? null : _toggleFavorite,
-            icon: Icon(
-              _isCurrentPoemFavorited ? Icons.star : Icons.star_border,
-            ),
-          ),
-          IconButton(
-            tooltip: '搜索诗词',
-            onPressed: _poems.isEmpty ? null : _showPoemSearch,
-            icon: const Icon(Icons.search),
-          ),
-          PopupMenuButton<int>(
-            tooltip: '切换诗词库',
-            enabled: _collections.isNotEmpty,
-            icon: const Icon(Icons.folder_open_outlined),
-            onSelected: _switchCollection,
-            itemBuilder: (context) {
-              return [
-                for (final item in _collections)
-                  if (item.id != null)
-                    PopupMenuItem<int>(
-                      value: item.id,
-                      child: Row(
-                        children: [
-                          SizedBox(
-                            width: 26,
-                            child: item.id == collection?.id
-                                ? const Icon(Icons.check, size: 18)
-                                : null,
-                          ),
-                          Expanded(
-                            child: Text(
-                              item.name,
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-              ];
-            },
-          ),
-        ],
-      ),
       body: SafeArea(
         child: _buildBody(poem),
       ),
@@ -938,18 +884,18 @@ class _LearningModeScreenState extends State<LearningModeScreen> {
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.end,
               children: [
-                FloatingActionButton.extended(
+                FloatingActionButton.small(
                   heroTag: 'learning-training',
+                  tooltip: '展才',
                   onPressed: _openTrainingLauncher,
-                  icon: const Icon(Icons.school_outlined),
-                  label: const Text('展才'),
+                  child: const Icon(Icons.school_outlined),
                 ),
-                const SizedBox(height: 12),
-                FloatingActionButton.extended(
+                const SizedBox(height: 10),
+                FloatingActionButton.small(
                   heroTag: 'learning-chat',
+                  tooltip: '问道',
                   onPressed: () => _openPoemChat(),
-                  icon: const Icon(Icons.smart_toy_outlined),
-                  label: const Text('问道'),
+                  child: const Icon(Icons.smart_toy_outlined),
                 ),
               ],
             ),
@@ -989,6 +935,7 @@ class _LearningModeScreenState extends State<LearningModeScreen> {
       );
     }
 
+    final collection = _selectedCollection;
     final parsedAnnotation = _parseAnnotation(poem.annotation);
     _annotationLineKeys.removeWhere(
       (lineNumber, _) => !parsedAnnotation.grouped.containsKey(lineNumber),
@@ -1003,133 +950,365 @@ class _LearningModeScreenState extends State<LearningModeScreen> {
       child: Stack(
         children: [
           SingleChildScrollView(
-          key: _learningListKey,
-          controller: _learningScrollController,
-          padding: const EdgeInsets.fromLTRB(52, 14, 52, 120),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              _PoemLearningHeader(
-                poem: poem,
-                onAskAi: (text) => _openPoemChat(initialInput: text),
-              ),
-              const SizedBox(height: 12),
-              _PoemContentView(
-                key: _poemContentKey,
-                poem: poem,
-                showToneMarks: _showToneMarks &&
-                    poem.prosodySupported &&
-                    poem.prosodyEnabled,
-                previewLineNumber: _previewLineNumber,
-                previewNotes: _previewAnnotationNotes,
-                onLineNumberTap: (lineNumber) {
-                  _jumpToAnnotationLine(lineNumber, parsedAnnotation);
-                },
-                onLineTap: (lineNumber) {
-                  _showLineAnnotationPreview(lineNumber, parsedAnnotation);
-                },
-                onAskAi: (text) => _openPoemChat(initialInput: text),
-                onDismissPreview: _hideLineAnnotationPreview,
-                onSelectionActiveChanged:
-                    _handleContentSelectionActiveChanged,
-              ),
-              const SizedBox(height: 12),
-              ProsodyPanel(
-                poem: poem,
-                showToneDetails: _showToneMarks,
-                calibrationBusy: _prosodyCalibrating,
-                onToneDetailsChanged: _handleToneDetailsChanged,
-                onManualCalibration: () => _openProsodyCalibrationDialog(poem),
-                onAiCalibration: () => _runProsodyAiCalibration(poem),
-              ),
-              if (poem.prosodySupported && poem.prosodyEnabled)
+            key: _learningListKey,
+            controller: _learningScrollController,
+            padding: const EdgeInsets.fromLTRB(58, 12, 58, 120),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                _PoemLearningHeader(
+                  poem: poem,
+                  onAskAi: (text) => _openPoemChat(initialInput: text),
+                ),
                 const SizedBox(height: 12),
-              _ControlledLearningSection(
-                sectionKey: _annotationSectionKey,
-                title: '注释',
-                icon: Icons.notes_outlined,
-                expanded: _annotationExpanded,
-                onExpansionChanged: (expanded) {
-                  setState(() {
-                    _annotationExpanded = expanded;
-                  });
-                },
-                child: _AnnotationView(
-                  annotation: parsedAnnotation,
-                  lineKeys: _annotationLineKeys,
-                  highlightedLine: _highlightedAnnotationLine,
+                _PoemContentView(
+                  key: _poemContentKey,
+                  poem: poem,
+                  showToneMarks: _showToneMarks &&
+                      poem.prosodySupported &&
+                      poem.prosodyEnabled,
+                  previewLineNumber: _previewLineNumber,
+                  previewNotes: _previewAnnotationNotes,
+                  onLineNumberTap: (lineNumber) {
+                    _jumpToAnnotationLine(lineNumber, parsedAnnotation);
+                  },
+                  onLineTap: (lineNumber) {
+                    _showLineAnnotationPreview(lineNumber, parsedAnnotation);
+                  },
+                  onAskAi: (text) => _openPoemChat(initialInput: text),
+                  onDismissPreview: _hideLineAnnotationPreview,
+                  onSelectionActiveChanged:
+                      _handleContentSelectionActiveChanged,
+                ),
+                const SizedBox(height: 12),
+                ProsodyPanel(
+                  poem: poem,
+                  showToneDetails: _showToneMarks,
+                  calibrationBusy: _prosodyCalibrating,
+                  onToneDetailsChanged: _handleToneDetailsChanged,
+                  onManualCalibration: () => _openProsodyCalibrationDialog(poem),
+                  onAiCalibration: () => _runProsodyAiCalibration(poem),
+                ),
+                if (poem.prosodySupported && poem.prosodyEnabled)
+                  const SizedBox(height: 12),
+                _ControlledLearningSection(
+                  sectionKey: _annotationSectionKey,
+                  title: '注释',
+                  icon: Icons.notes_outlined,
+                  expanded: _annotationExpanded,
+                  onExpansionChanged: (expanded) {
+                    setState(() {
+                      _annotationExpanded = expanded;
+                    });
+                  },
+                  child: _AnnotationView(
+                    annotation: parsedAnnotation,
+                    lineKeys: _annotationLineKeys,
+                    highlightedLine: _highlightedAnnotationLine,
+                    onAskAi: (text) => _openPoemChat(initialInput: text),
+                  ),
+                ),
+                _LearningNoteSection(
+                  note: poem.learningNote,
+                  onChanged: (note) => _saveLearningNote(poem, note),
                   onAskAi: (text) => _openPoemChat(initialInput: text),
                 ),
-              ),
-              _LearningNoteSection(
-                note: poem.learningNote,
-                onChanged: (note) => _saveLearningNote(poem, note),
-                onAskAi: (text) => _openPoemChat(initialInput: text),
-              ),
-              _LearningSection(
-                title: '译文',
-                icon: Icons.translate,
-                initiallyExpanded: false,
-                child: _SelectableBlock(
-                  text: poem.translation,
-                  emptyText: '暂无译文。可以在编辑页补充，也可以让智能体补全。',
-                  onAskAi: (text) => _openPoemChat(initialInput: text),
+                _LearningSection(
+                  title: '译文',
+                  icon: Icons.translate,
+                  initiallyExpanded: false,
+                  child: _SelectableBlock(
+                    text: poem.translation,
+                    emptyText: '暂无译文。可以在编辑页补充，也可以让智能体补全。',
+                    onAskAi: (text) => _openPoemChat(initialInput: text),
+                  ),
+                ),
+                _LearningSection(
+                  title: '赏析',
+                  icon: Icons.auto_stories_outlined,
+                  initiallyExpanded: false,
+                  child: _SelectableBlock(
+                    text: poem.appreciation,
+                    emptyText: '暂无赏析。可以让智能体先生成一个学习版赏析。',
+                    onAskAi: (text) => _openPoemChat(initialInput: text),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          _LearningCollectionNameRail(name: collection?.name ?? '学文'),
+          Positioned(
+            left: 0,
+            top: 2,
+            child: IconButton(
+              tooltip: '返回',
+              onPressed: () => Navigator.maybePop(context),
+              icon: const Icon(Icons.arrow_back),
+              color: const Color(0xFF4E3612),
+            ),
+          ),
+          Positioned(
+            right: 8,
+            top: 10,
+            child: _LearningToolRail(
+              collections: _collections,
+              currentCollection: collection,
+              currentPoem: poem,
+              isFavorite: _isCurrentPoemFavorited,
+              canSearch: _poems.isNotEmpty,
+              canJump: _poems.isNotEmpty,
+              onSwitchCollection: _switchCollection,
+              onToggleFavorite: _toggleFavorite,
+              onSearch: _showPoemSearch,
+              onJump: _showJumpDialog,
+            ),
+          ),
+          if (_returnScrollOffset != null)
+            Positioned(
+              left: 52,
+              right: 52,
+              bottom: 18,
+              child: Center(
+                child: FilledButton.tonalIcon(
+                  onPressed: _returnToPreviousContentPosition,
+                  icon: const Icon(Icons.keyboard_return),
+                  label: const Text('回到原位置'),
                 ),
               ),
-              _LearningSection(
-                title: '赏析',
-                icon: Icons.auto_stories_outlined,
-                initiallyExpanded: false,
-                child: _SelectableBlock(
-                  text: poem.appreciation,
-                  emptyText: '暂无赏析。可以让智能体先生成一个学习版赏析。',
-                  onAskAi: (text) => _openPoemChat(initialInput: text),
-                ),
+            ),
+          Positioned(
+            left: 10,
+            top: 0,
+            bottom: 0,
+            child: Center(
+              child: _SideTriangleButton(
+                tooltip: '上一首',
+                pointsRight: false,
+                onPressed: _canGoPrevious
+                    ? () => _goToIndex(_currentIndex - 1)
+                    : null,
               ),
+            ),
+          ),
+          Positioned(
+            right: 10,
+            top: 0,
+            bottom: 0,
+            child: Center(
+              child: _SideTriangleButton(
+                tooltip: '下一首',
+                pointsRight: true,
+                onPressed: _canGoNext
+                    ? () => _goToIndex(_currentIndex + 1)
+                    : null,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _LearningCollectionNameRail extends StatelessWidget {
+  const _LearningCollectionNameRail({required this.name});
+
+  final String name;
+
+  @override
+  Widget build(BuildContext context) {
+    final displayName = name.trim().isEmpty ? '学文' : name.trim();
+    final chars =
+        displayName.runes.map((rune) => String.fromCharCode(rune)).take(15);
+
+    return Positioned(
+      left: 14,
+      top: 78,
+      bottom: 24,
+      child: IgnorePointer(
+        child: Opacity(
+          opacity: 0.18,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              for (final char in chars)
+                Text(
+                  char,
+                  style: const TextStyle(
+                    color: Color(0xFF6E5519),
+                    fontFamily: kSanjiXingKaiFontFamily,
+                    fontSize: 30,
+                    fontWeight: FontWeight.w700,
+                    height: 0.96,
+                  ),
+                ),
             ],
           ),
         ),
-          if (_returnScrollOffset != null)
-            Positioned(
-            left: 52,
-            right: 52,
-            bottom: 18,
-            child: Center(
-              child: FilledButton.tonalIcon(
-                onPressed: _returnToPreviousContentPosition,
-                icon: const Icon(Icons.keyboard_return),
-                label: const Text('回到原位置'),
-              ),
-            ),
+      ),
+    );
+  }
+}
+
+class _LearningToolRail extends StatelessWidget {
+  const _LearningToolRail({
+    required this.collections,
+    required this.currentCollection,
+    required this.currentPoem,
+    required this.isFavorite,
+    required this.canSearch,
+    required this.canJump,
+    required this.onSwitchCollection,
+    required this.onToggleFavorite,
+    required this.onSearch,
+    required this.onJump,
+  });
+
+  final List<PoemCollection> collections;
+  final PoemCollection? currentCollection;
+  final Poem? currentPoem;
+  final bool isFavorite;
+  final bool canSearch;
+  final bool canJump;
+  final ValueChanged<int> onSwitchCollection;
+  final VoidCallback onToggleFavorite;
+  final VoidCallback onSearch;
+  final VoidCallback onJump;
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        PopupMenuButton<int>(
+          tooltip: '切换诗词库',
+          enabled: collections.isNotEmpty,
+          onSelected: onSwitchCollection,
+          itemBuilder: (context) {
+            return [
+              for (final item in collections)
+                if (item.id != null)
+                  PopupMenuItem<int>(
+                    value: item.id,
+                    child: Row(
+                      children: [
+                        SizedBox(
+                          width: 26,
+                          child: item.id == currentCollection?.id
+                              ? const Icon(Icons.check, size: 18)
+                              : null,
+                        ),
+                        Expanded(
+                          child: Text(
+                            item.name,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+            ];
+          },
+          child: const _LearningRailButton(
+            tooltip: '切换诗词库',
+            icon: Icons.folder_open_outlined,
+            visuallyEnabled: true,
           ),
-          Positioned(
-          left: 6,
-          top: 0,
-          bottom: 0,
-          child: Center(
-            child: IconButton.filledTonal(
-              tooltip: '上一首',
-              onPressed:
-                  _canGoPrevious ? () => _goToIndex(_currentIndex - 1) : null,
-              icon: const Icon(Icons.chevron_left),
+        ),
+        const SizedBox(height: 9),
+        _LearningRailButton(
+          tooltip: '搜索诗词',
+          icon: Icons.search,
+          onTap: canSearch ? onSearch : null,
+        ),
+        const SizedBox(height: 9),
+        _LearningRailButton(
+          tooltip: isFavorite ? '管理收藏' : '收藏',
+          icon: isFavorite ? Icons.star : Icons.star_border,
+          onTap: currentPoem == null ? null : onToggleFavorite,
+        ),
+        const SizedBox(height: 9),
+        _LearningRailButton(
+          tooltip: '跳转',
+          icon: Icons.input,
+          onTap: canJump ? onJump : null,
+        ),
+      ],
+    );
+  }
+}
+
+class _LearningRailButton extends StatelessWidget {
+  const _LearningRailButton({
+    required this.tooltip,
+    required this.icon,
+    this.visuallyEnabled,
+    this.onTap,
+  });
+
+  final String tooltip;
+  final IconData icon;
+  final bool? visuallyEnabled;
+  final VoidCallback? onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final enabled = visuallyEnabled ?? onTap != null;
+    return Tooltip(
+      message: tooltip,
+      child: Material(
+        color: Colors.transparent,
+        child: InkResponse(
+          radius: 22,
+          onTap: onTap,
+          child: SizedBox(
+            width: 40,
+            height: 40,
+            child: Icon(
+              icon,
+              size: 24,
+              color: enabled
+                  ? const Color(0xFF5A4215)
+                  : const Color(0xFF5A4215).withOpacity(0.36),
             ),
           ),
         ),
-          Positioned(
-          right: 6,
-          top: 0,
-          bottom: 0,
-          child: Center(
-            child: IconButton.filledTonal(
-              tooltip: '下一首',
-              onPressed: _canGoNext
-                  ? () => _goToIndex(_currentIndex + 1)
-                  : null,
-              icon: const Icon(Icons.chevron_right),
-            ),
-          ),
-          ),
-        ],
+      ),
+    );
+  }
+}
+
+class _SideTriangleButton extends StatelessWidget {
+  const _SideTriangleButton({
+    required this.tooltip,
+    required this.pointsRight,
+    required this.onPressed,
+  });
+
+  final String tooltip;
+  final bool pointsRight;
+  final VoidCallback? onPressed;
+
+  @override
+  Widget build(BuildContext context) {
+    final enabled = onPressed != null;
+    return Tooltip(
+      message: tooltip,
+      child: IconButton(
+        onPressed: onPressed,
+        style: IconButton.styleFrom(
+          foregroundColor: enabled
+              ? const Color(0xFF6B4B08)
+              : const Color(0xFF6B4B08).withOpacity(0.24),
+          backgroundColor: Colors.transparent,
+          disabledForegroundColor: const Color(0xFF6B4B08).withOpacity(0.22),
+          splashFactory: InkSparkle.splashFactory,
+        ),
+        icon: Transform.rotate(
+          angle: pointsRight ? 0 : math.pi,
+          child: const Icon(Icons.play_arrow_rounded, size: 32),
+        ),
       ),
     );
   }
@@ -1157,52 +1336,6 @@ class _TrainingLaunchOptions {
 
   final TrainingDifficulty difficulty;
   final CorrectionMode correctionMode;
-}
-
-class _LearningTitle extends StatelessWidget {
-  const _LearningTitle({
-    required this.collection,
-    required this.currentIndex,
-    required this.total,
-    required this.onTapProgress,
-  });
-
-  final PoemCollection? collection;
-  final int currentIndex;
-  final int total;
-  final VoidCallback? onTapProgress;
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final collectionName = collection?.name ?? '学文';
-    final progress = total == 0 ? '暂无诗词' : '$currentIndex / $total';
-
-    return Column(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        Text(
-          collectionName,
-          maxLines: 1,
-          overflow: TextOverflow.ellipsis,
-        ),
-        InkWell(
-          borderRadius: BorderRadius.circular(6),
-          onTap: onTapProgress,
-          child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
-            child: Text(
-              progress,
-              style: theme.textTheme.labelSmall?.copyWith(
-                decoration:
-                    onTapProgress == null ? null : TextDecoration.underline,
-              ),
-            ),
-          ),
-        ),
-      ],
-    );
-  }
 }
 
 class _JumpToPoemDialog extends StatefulWidget {

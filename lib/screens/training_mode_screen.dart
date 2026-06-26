@@ -73,7 +73,7 @@ extension CorrectionModeInfo on CorrectionMode {
       case CorrectionMode.instant:
         return '每个空输入完毕后立即校对。';
       case CorrectionMode.finalReview:
-        return '全部填写后点击“核对答案”。';
+        return '全部填写后点击核对答案。';
     }
   }
 }
@@ -1221,12 +1221,12 @@ class _TrainingModeScreenState extends State<TrainingModeScreen> {
           top: 0,
           bottom: 0,
           child: Center(
-            child: IconButton.filledTonal(
+            child: _TrainingSideTriangleButton(
               tooltip: '上一首',
+              pointsRight: false,
               onPressed: _canGoPrevious
                   ? () => unawaited(_goToIndex(_currentIndex - 1))
                   : null,
-              icon: const Icon(Icons.chevron_left),
             ),
           ),
         ),
@@ -1235,12 +1235,12 @@ class _TrainingModeScreenState extends State<TrainingModeScreen> {
           top: 0,
           bottom: 0,
           child: Center(
-            child: IconButton.filledTonal(
+            child: _TrainingSideTriangleButton(
               tooltip: '下一首',
+              pointsRight: true,
               onPressed: _canGoNext
                   ? () => unawaited(_goToIndex(_currentIndex + 1))
                   : null,
-              icon: const Icon(Icons.chevron_right),
             ),
           ),
         ),
@@ -1351,12 +1351,12 @@ class _TrainingModeScreenState extends State<TrainingModeScreen> {
           top: 0,
           bottom: 0,
           child: Center(
-            child: IconButton.filledTonal(
+            child: _TrainingSideTriangleButton(
               tooltip: '上一首',
+              pointsRight: false,
               onPressed: _canGoPrevious
                   ? () => unawaited(_goToIndex(_currentIndex - 1))
                   : null,
-              icon: const Icon(Icons.chevron_left),
             ),
           ),
         ),
@@ -1365,12 +1365,12 @@ class _TrainingModeScreenState extends State<TrainingModeScreen> {
           top: 0,
           bottom: 0,
           child: Center(
-            child: IconButton.filledTonal(
+            child: _TrainingSideTriangleButton(
               tooltip: '下一首',
+              pointsRight: true,
               onPressed: _canGoNext
                   ? () => unawaited(_goToIndex(_currentIndex + 1))
                   : null,
-              icon: const Icon(Icons.chevron_right),
             ),
           ),
         ),
@@ -1516,6 +1516,41 @@ class _TrainingBottomActionButton extends StatelessWidget {
   }
 }
 
+class _TrainingSideTriangleButton extends StatelessWidget {
+  const _TrainingSideTriangleButton({
+    required this.tooltip,
+    required this.pointsRight,
+    required this.onPressed,
+  });
+
+  final String tooltip;
+  final bool pointsRight;
+  final VoidCallback? onPressed;
+
+  @override
+  Widget build(BuildContext context) {
+    final enabled = onPressed != null;
+    return Tooltip(
+      message: tooltip,
+      child: IconButton(
+        onPressed: onPressed,
+        style: IconButton.styleFrom(
+          foregroundColor: enabled
+              ? const Color(0xFF6B4B08)
+              : const Color(0xFF6B4B08).withOpacity(0.24),
+          backgroundColor: Colors.transparent,
+          disabledForegroundColor: const Color(0xFF6B4B08).withOpacity(0.22),
+          splashFactory: InkSparkle.splashFactory,
+        ),
+        icon: RotatedBox(
+          quarterTurns: pointsRight ? 0 : 2,
+          child: const Icon(Icons.play_arrow_rounded, size: 32),
+        ),
+      ),
+    );
+  }
+}
+
 class _TrainingTitle extends StatelessWidget {
   const _TrainingTitle({
     required this.collection,
@@ -1571,71 +1606,83 @@ class _TrainingProgressCard extends StatelessWidget {
     return HuiyunPaperCard(
       margin: EdgeInsets.zero,
       padding: const EdgeInsets.all(16),
-      child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              children: [
-                Text('当前进度', style: theme.textTheme.labelLarge),
-                const Spacer(),
-                _AchievementBadge(level: achievementLevel),
-              ],
-            ),
-            const SizedBox(height: 8),
-            InkWell(
-              borderRadius: BorderRadius.circular(8),
-              onTap: onTapProgress,
-              child: Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 2, vertical: 2),
-                child: Text(
-                  '$currentIndex / $total',
-                  style: theme.textTheme.headlineSmall?.copyWith(
-                    color: const Color(0xFF4F3B12),
+      child: Stack(
+        clipBehavior: Clip.none,
+        children: [
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  Text('当前进度', style: theme.textTheme.labelLarge),
+                ],
+              ),
+              const SizedBox(height: 8),
+              InkWell(
+                borderRadius: BorderRadius.circular(8),
+                onTap: onTapProgress,
+                child: Padding(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 2, vertical: 2),
+                  child: Text(
+                    '$currentIndex / $total',
+                    style: theme.textTheme.headlineSmall?.copyWith(
+                      color: const Color(0xFF4F3B12),
+                    ),
                   ),
                 ),
               ),
-            ),
-            const SizedBox(height: 6),
-            Text(
-              poem.title.trim().isEmpty ? '未命名诗词' : poem.title.trim(),
-              maxLines: 2,
-              overflow: TextOverflow.ellipsis,
-              style: theme.textTheme.titleLarge?.copyWith(
-                fontFamily: kFeiHuaSongTiFontFamily,
-                fontWeight: FontWeight.w700,
+              const SizedBox(height: 6),
+              Text(
+                poem.title.trim().isEmpty ? '未命名诗词' : poem.title.trim(),
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+                style: theme.textTheme.titleLarge?.copyWith(
+                  fontFamily: kFeiHuaSongTiFontFamily,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+              const SizedBox(height: 4),
+              Text(
+                authorLine.isEmpty ? '未知作者' : authorLine,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: theme.textTheme.bodyMedium,
+              ),
+              const SizedBox(height: 14),
+              Row(
+                children: [
+                  _TrainingNavButton(
+                    tooltip: '上一首',
+                    onPressed: onPrevious,
+                    icon: const Icon(Icons.chevron_left),
+                  ),
+                  const SizedBox(width: 8),
+                  _TrainingNavButton(
+                    tooltip: '下一首',
+                    onPressed: onNext,
+                    icon: const Icon(Icons.chevron_right),
+                  ),
+                  const Spacer(),
+                  TextButton.icon(
+                    onPressed: onSearch,
+                    icon: const Icon(Icons.search),
+                    label: const Text('查找诗词'),
+                  ),
+                ],
+              ),
+            ],
+          ),
+          if (achievementLevel > 0)
+            Positioned(
+              top: -8,
+              right: -6,
+              child: IgnorePointer(
+                child: _AchievementBadge(level: achievementLevel, size: 94),
               ),
             ),
-            const SizedBox(height: 4),
-            Text(
-              authorLine.isEmpty ? '未知作者' : authorLine,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: theme.textTheme.bodyMedium,
-            ),
-            const SizedBox(height: 14),
-            Row(
-              children: [
-                _TrainingNavButton(
-                  tooltip: '上一首',
-                  onPressed: onPrevious,
-                  icon: const Icon(Icons.chevron_left),
-                ),
-                const SizedBox(width: 8),
-                _TrainingNavButton(
-                  tooltip: '下一首',
-                  onPressed: onNext,
-                  icon: const Icon(Icons.chevron_right),
-                ),
-                const Spacer(),
-                TextButton.icon(
-                  onPressed: onSearch,
-                  icon: const Icon(Icons.search),
-                  label: const Text('查找诗词'),
-                ),
-              ],
-            ),
-          ],
-        ),
+        ],
+      ),
     );
   }
 }
@@ -1736,7 +1783,7 @@ class _TrainingChoiceTile extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final borderColor =
-        selected ? const Color(0xFFC69620) : const Color(0xFFE6C46B);
+        selected ? const Color(0xFFB8841F) : const Color(0xFFE6C46B);
     final foreground =
         selected ? const Color(0xFF4F3B12) : HuiyunPalette.ink;
 
@@ -1752,14 +1799,14 @@ class _TrainingChoiceTile extends StatelessWidget {
           padding: const EdgeInsets.symmetric(horizontal: 15, vertical: 9),
           decoration: BoxDecoration(
             color: selected
-                ? const Color(0xFFFFE8AB).withOpacity(0.78)
-                : const Color(0xFFFFFCF1).withOpacity(0.68),
+                ? const Color(0xFFF2D68B).withOpacity(0.88)
+                : const Color(0xFFFFFCF1).withOpacity(0.72),
             borderRadius: BorderRadius.circular(13),
             border: Border.all(color: borderColor, width: selected ? 1.15 : 1),
             boxShadow: selected
                 ? const [
                     BoxShadow(
-                      color: Color(0x1AE0AF38),
+                      color: Color(0x1CB8841F),
                       blurRadius: 10,
                       offset: Offset(0, 4),
                     ),
@@ -1771,6 +1818,8 @@ class _TrainingChoiceTile extends StatelessWidget {
             textAlign: TextAlign.center,
             style: theme.textTheme.labelLarge?.copyWith(
               color: foreground,
+              fontFamily: kSongTiFontFamily,
+              fontFamilyFallback: kSongTiFontFallback,
               fontWeight: FontWeight.w700,
               height: 1,
             ),
@@ -1840,47 +1889,54 @@ class _TrainingPoemHeader extends StatelessWidget {
       poem.author.trim(),
     ].where((item) => item.isNotEmpty).join(' · ');
 
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
+    return Stack(
+      clipBehavior: Clip.none,
       children: [
-        Row(
+        Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Expanded(
-              child: Text(
-                poem.title.trim().isEmpty ? '未命名诗词' : poem.title.trim(),
-                style: _titleStyle(theme.textTheme, poem.title.length)
-                    ?.copyWith(
-                      color: const Color(0xFF4F3B12),
-                      fontFamily: kFeiHuaSongTiFontFamily,
-                      fontWeight: FontWeight.w700,
-                      height: 1.24,
-                    ),
-              ),
+            Text(
+              poem.title.trim().isEmpty ? '未命名诗词' : poem.title.trim(),
+              style: _titleStyle(theme.textTheme, poem.title.length)
+                  ?.copyWith(
+                    color: const Color(0xFF4F3B12),
+                    fontFamily: kFeiHuaSongTiFontFamily,
+                    fontWeight: FontWeight.w700,
+                    height: 1.24,
+                  ),
             ),
-            const SizedBox(width: 10),
-            _AchievementBadge(level: achievementLevel),
+            const SizedBox(height: 6),
+            Text(
+              authorLine.isEmpty ? '未知作者' : authorLine,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: theme.textTheme.titleMedium,
+            ),
+            const SizedBox(height: 10),
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: [
+                _TrainingChip(
+                  icon: Icons.school_outlined,
+                  text: difficulty.label,
+                ),
+                _TrainingChip(
+                  icon: Icons.fact_check_outlined,
+                  text: correctionMode.label,
+                ),
+              ],
+            ),
           ],
         ),
-        const SizedBox(height: 6),
-        Text(
-          authorLine.isEmpty ? '未知作者' : authorLine,
-          maxLines: 1,
-          overflow: TextOverflow.ellipsis,
-          style: theme.textTheme.titleMedium,
-        ),
-        const SizedBox(height: 10),
-        Wrap(
-          spacing: 8,
-          runSpacing: 8,
-          children: [
-            _TrainingChip(icon: Icons.school_outlined, text: difficulty.label),
-            _TrainingChip(
-              icon: Icons.fact_check_outlined,
-              text: correctionMode.label,
+        if (achievementLevel > 0)
+          Positioned(
+            top: -10,
+            right: -4,
+            child: IgnorePointer(
+              child: _AchievementBadge(level: achievementLevel, size: 98),
             ),
-          ],
-        ),
+          ),
       ],
     );
   }
@@ -1920,7 +1976,16 @@ class _TrainingChip extends StatelessWidget {
           children: [
             Icon(icon, size: 16, color: const Color(0xFF7B5A00)),
             const SizedBox(width: 5),
-            Text(text),
+            Text(
+              text,
+              style: Theme.of(context).textTheme.labelLarge?.copyWith(
+                    color: const Color(0xFF5A4215),
+                    fontFamily: kSongTiFontFamily,
+                    fontFamilyFallback: kSongTiFontFallback,
+                    fontWeight: FontWeight.w700,
+                    height: 1,
+                  ),
+            ),
           ],
         ),
       ),
@@ -1929,34 +1994,42 @@ class _TrainingChip extends StatelessWidget {
 }
 
 class _AchievementBadge extends StatelessWidget {
-  const _AchievementBadge({required this.level});
+  const _AchievementBadge({required this.level, this.size = 60});
 
   final int level;
+  final double size;
 
   @override
   Widget build(BuildContext context) {
-    final label = _achievementLabel(level);
-    final achieved = level > 0;
+    final asset = _achievementStampAsset(level);
+    if (asset == null) {
+      return const SizedBox.shrink();
+    }
 
-    return DecoratedBox(
-      decoration: BoxDecoration(
-        color: achieved ? const Color(0xFFE0B02E) : const Color(0xFFFFF4C7),
-        borderRadius: BorderRadius.circular(8),
-        border: Border.all(
-          color: achieved ? const Color(0xFFB18200) : const Color(0xFFEEDC9A),
-        ),
-      ),
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 5),
-        child: Text(
-          label,
-          style: TextStyle(
-            color: achieved ? Colors.white : const Color(0xFF7B5A00),
-            fontWeight: FontWeight.w600,
-          ),
-        ),
+    return SizedBox(
+      width: size,
+      height: size * 0.78,
+      child: Image.asset(
+        asset,
+        fit: BoxFit.contain,
+        filterQuality: FilterQuality.medium,
       ),
     );
+  }
+}
+
+String? _achievementStampAsset(int level) {
+  switch (level) {
+    case 1:
+      return 'assets/training_stamps/xiucai.png';
+    case 2:
+      return 'assets/training_stamps/juren.png';
+    case 3:
+      return 'assets/training_stamps/gongsheng.png';
+    case 4:
+      return 'assets/training_stamps/jinshi.png';
+    default:
+      return null;
   }
 }
 

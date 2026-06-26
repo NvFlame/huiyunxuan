@@ -233,14 +233,10 @@ class ToneMarkedLineIssueOverlay extends StatelessWidget {
                 ),
             for (final relation in relations)
               Positioned(
-                left: _relationLineLeft(
-                  line,
-                  showLineNumbers: showLineNumbers,
-                  maxWidth: constraints.maxWidth,
-                ),
-                right: _relationLineRight(line),
-                bottom: 0,
-                height: 18,
+                right: _relationMarkerRight(line),
+                bottom: -2,
+                width: 22,
+                height: 22,
                 child: _RelationIssueLine(relation: relation),
               ),
           ],
@@ -347,6 +343,10 @@ double _relationLineLeft(
 
 double _relationLineRight(String line) {
   return _isSevenCharacterLine(line) ? 10 : 6;
+}
+
+double _relationMarkerRight(String line) {
+  return _isSevenCharacterLine(line) ? -1 : 2;
 }
 
 double _issueTop(String line) {
@@ -668,7 +668,7 @@ class _RelationIssueLine extends StatelessWidget {
       color: color,
       child: CustomPaint(
         painter: _RelationIssuePainter(color: color),
-        child: const SizedBox.expand(),
+        child: const SizedBox(width: 22, height: 22),
       ),
     );
   }
@@ -681,17 +681,15 @@ class _RelationIssuePainter extends CustomPainter {
 
   @override
   void paint(Canvas canvas, Size size) {
-    final paint = Paint()
-      ..color = color.withOpacity(0.75)
-      ..strokeWidth = 1
-      ..strokeCap = StrokeCap.round;
-    final y = size.height - 1;
-    canvas.drawLine(
-      Offset.zero.translate(0, y),
-      Offset(size.width - 8, y),
-      paint,
-    );
-    canvas.drawCircle(Offset(size.width - 4, y), 4, Paint()..color = color);
+    final center = Offset(size.width / 2, size.height / 2);
+    const radius = 5.0;
+    final path = Path()
+      ..moveTo(center.dx, center.dy - radius)
+      ..lineTo(center.dx + radius, center.dy)
+      ..lineTo(center.dx, center.dy + radius)
+      ..lineTo(center.dx - radius, center.dy)
+      ..close();
+    canvas.drawPath(path, Paint()..color = color);
   }
 
   @override

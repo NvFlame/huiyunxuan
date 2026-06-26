@@ -4,6 +4,7 @@ import '../data/app_database.dart';
 import '../models/api_config.dart';
 import '../services/openai_api_service.dart';
 import '../services/web_search_service.dart';
+import '../theme/app_typography.dart';
 
 class ApiConfigEditorScreen extends StatefulWidget {
   const ApiConfigEditorScreen({super.key, this.config});
@@ -410,7 +411,13 @@ class _ApiConfigEditorScreenState extends State<ApiConfigEditorScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: Text(_isEditing ? '编辑 API 配置' : '新增 API 配置'),
+        title: Text(
+          _isEditing ? '编辑API配置' : '新增API配置',
+          style: const TextStyle(
+            fontFamily: kFeiHuaSongTiFontFamily,
+            fontWeight: FontWeight.w700,
+          ),
+        ),
         actions: [
           IconButton(
             tooltip: '保存',

@@ -270,7 +270,21 @@ class _CollectionListScreenState extends State<CollectionListScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('诗词库管理')),
+      appBar: AppBar(
+        title: Text(
+          '诗词库管理',
+          style: Theme.of(context).textTheme.headlineSmall?.copyWith(
+                fontFamily: kFeiHuaSongTiFontFamily,
+                fontWeight: FontWeight.w700,
+                color: const Color(0xFF4D3714),
+              ),
+        ),
+        backgroundColor: Colors.transparent,
+        surfaceTintColor: Colors.transparent,
+        shadowColor: Colors.transparent,
+        elevation: 0,
+        scrolledUnderElevation: 0,
+      ),
       body: FutureBuilder<List<PoemCollection>>(
         future: _collectionsFuture,
         builder: (context, snapshot) {

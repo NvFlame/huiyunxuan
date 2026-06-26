@@ -1,5 +1,6 @@
 const String kFeiHuaSongTiFontFamily = 'FeiHuaSongTi';
 const String kSongTiFontFamily = 'HuiyunSongTi';
+const String kSanjiXingKaiFontFamily = 'SanjiXingKai';
 
 const List<String> kSongTiFontFallback = [
   'SimSun',

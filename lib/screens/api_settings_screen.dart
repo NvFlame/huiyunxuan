@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../data/app_database.dart';
 import '../models/api_config.dart';
 import '../services/app_backup_service.dart';
+import '../theme/app_typography.dart';
 import '../widgets/huiyun_visuals.dart';
 import 'api_config_editor_screen.dart';
 
@@ -253,7 +254,19 @@ class _ApiSettingsScreenState extends State<ApiSettingsScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('设置'),
+        title: Text(
+          '设置',
+          style: Theme.of(context).textTheme.headlineSmall?.copyWith(
+                fontFamily: kFeiHuaSongTiFontFamily,
+                fontWeight: FontWeight.w700,
+                color: const Color(0xFF4D3714),
+              ),
+        ),
+        backgroundColor: Colors.transparent,
+        surfaceTintColor: Colors.transparent,
+        shadowColor: Colors.transparent,
+        elevation: 0,
+        scrolledUnderElevation: 0,
         actions: [
           IconButton(
             tooltip: _showSearch ? '关闭搜索' : '搜索',

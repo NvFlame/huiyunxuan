@@ -67,6 +67,8 @@ flutter:
     - assets/data/tang_poems_300.json
     - assets/branding/home_title.png
     - assets/branding/cloud_mark.png
+    - assets/training_stamps/
+    - assets/time_covers/
 
   # To add assets to your application, add an assets section, like this:
   # assets:
@@ -92,6 +94,9 @@ flutter:
     - family: HuiyunSongTi
       fonts:
         - asset: simsun.ttc
+    - family: SanjiXingKai
+      fonts:
+        - asset: sanji-xk.ttf
   #   - family: Schyler
   #     fonts:
   #       - asset: fonts/Schyler-Regular.ttf

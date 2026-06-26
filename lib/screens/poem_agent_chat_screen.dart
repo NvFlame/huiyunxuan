@@ -11,6 +11,7 @@ import '../services/poem_text_format_service.dart';
 import '../services/prosody_ai_service.dart';
 import '../services/prosody_service.dart';
 import '../services/web_search_service.dart';
+import '../theme/app_typography.dart';
 import '../widgets/duplicate_poem_dialog.dart';
 
 class PoemAgentChatScreen extends StatefulWidget {
@@ -45,21 +46,24 @@ class _PoemAgentChatScreenState extends State<PoemAgentChatScreen> {
   bool _sending = false;
   bool _changed = false;
 
-  String get _screenTitle {
-    final focusPoem = _focusPoem;
-    if (focusPoem != null) {
-      return '《${focusPoem.title}》助手';
-    }
-    return widget.currentCollection == null
-        ? '诗词库助手'
-        : '${widget.currentCollection!.name}助手';
-  }
-
   String get _inputHintText {
     if (_focusPoem != null) {
       return '例如：解释前两句，或补充本文赏析。';
     }
     return '例如：添加《使至塞上》和《赠汪伦》，或补充《春望》的译文';
+  }
+
+  String get _poemTitleWatermark {
+    final title = _focusPoem?.title.trim() ?? '';
+    if (title.isEmpty) {
+      return '';
+    }
+    return title
+        .replaceAll(
+          RegExp(r'[《》〈〉“”‘’「」『』（）()\[\]【】\s，。！？；：、,.!?;:·…—\-]'),
+          '',
+        )
+        .trim();
   }
 
   @override
@@ -1107,10 +1111,14 @@ class _PoemAgentChatScreenState extends State<PoemAgentChatScreen> {
           title: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              Text(
-                _screenTitle,
+              const Text(
+                '问道',
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  fontFamily: kFeiHuaSongTiFontFamily,
+                  fontWeight: FontWeight.w700,
+                ),
               ),
               if ((_apiConfig?.chatModel.trim() ?? '').isNotEmpty)
                 Text(
@@ -1132,51 +1140,106 @@ class _PoemAgentChatScreenState extends State<PoemAgentChatScreen> {
           ],
         ),
         body: SafeArea(
-          child: Column(
+          child: Stack(
+            fit: StackFit.expand,
             children: [
-              Expanded(
-                child: _loading
-                    ? const Center(child: CircularProgressIndicator())
-                    : ListView.builder(
-                        controller: _scrollController,
-                        padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
-                        itemCount: _messages.length,
-                        itemBuilder: (context, index) {
-                          final message = _messages[index];
-                          return Padding(
-                            padding: const EdgeInsets.only(bottom: 10),
-                            child: _ChatBubble(message: message),
-                          );
-                        },
-                      ),
+              Positioned(
+                top: 220,
+                right: 78,
+                bottom: 84,
+                child: _PoemTitleWatermark(title: _poemTitleWatermark),
               ),
-              if (_sending) const LinearProgressIndicator(minHeight: 2),
-              Padding(
-                padding: const EdgeInsets.fromLTRB(12, 8, 12, 12),
-                child: Row(
-                  crossAxisAlignment: CrossAxisAlignment.end,
-                  children: [
-                    Expanded(
-                      child: TextField(
-                        controller: _inputController,
-                        minLines: 1,
-                        maxLines: 4,
-                        textInputAction: TextInputAction.newline,
-                        decoration: InputDecoration(
-                          hintText: _inputHintText,
+              Column(
+                children: [
+                  Expanded(
+                    child: _loading
+                        ? const Center(child: CircularProgressIndicator())
+                        : ListView.builder(
+                            controller: _scrollController,
+                            padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
+                            itemCount: _messages.length,
+                            itemBuilder: (context, index) {
+                              final message = _messages[index];
+                              return Padding(
+                                padding: const EdgeInsets.only(bottom: 10),
+                                child: _ChatBubble(message: message),
+                              );
+                            },
+                          ),
+                  ),
+                  if (_sending) const LinearProgressIndicator(minHeight: 2),
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(12, 8, 12, 12),
+                    child: Row(
+                      crossAxisAlignment: CrossAxisAlignment.end,
+                      children: [
+                        Expanded(
+                          child: TextField(
+                            controller: _inputController,
+                            minLines: 1,
+                            maxLines: 4,
+                            textInputAction: TextInputAction.newline,
+                            decoration: InputDecoration(
+                              hintText: _inputHintText,
+                            ),
+                            onSubmitted: (_) => _sendMessage(),
+                          ),
                         ),
-                        onSubmitted: (_) => _sendMessage(),
-                      ),
+                        const SizedBox(width: 8),
+                        IconButton.filled(
+                          tooltip: '发送',
+                          style: IconButton.styleFrom(
+                            backgroundColor: const Color(0xFFE2BE62),
+                            foregroundColor: const Color(0xFF5D4308),
+                            disabledBackgroundColor: const Color(0xFFE8D8AA),
+                            disabledForegroundColor: const Color(0xFF9A8755),
+                          ),
+                          onPressed: _sending ? null : _sendMessage,
+                          icon: const Icon(Icons.send),
+                        ),
+                      ],
                     ),
-                    const SizedBox(width: 8),
-                    IconButton.filled(
-                      tooltip: '发送',
-                      onPressed: _sending ? null : _sendMessage,
-                      icon: const Icon(Icons.send),
-                    ),
-                  ],
-                ),
+                  ),
+                ],
               ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _PoemTitleWatermark extends StatelessWidget {
+  const _PoemTitleWatermark({required this.title});
+
+  final String title;
+
+  @override
+  Widget build(BuildContext context) {
+    if (title.isEmpty) {
+      return const SizedBox.shrink();
+    }
+    final chars = title.runes.map((rune) => String.fromCharCode(rune));
+    return IgnorePointer(
+      child: Opacity(
+        opacity: 0.18,
+        child: SingleChildScrollView(
+          physics: const NeverScrollableScrollPhysics(),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              for (final char in chars)
+                Text(
+                  char,
+                  style: const TextStyle(
+                    color: Color(0xFF8A6A20),
+                    fontFamily: kSanjiXingKaiFontFamily,
+                    fontSize: 34,
+                    fontWeight: FontWeight.w500,
+                    height: 0.92,
+                  ),
+                ),
             ],
           ),
         ),

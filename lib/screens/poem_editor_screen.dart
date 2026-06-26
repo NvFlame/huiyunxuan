@@ -4,6 +4,7 @@ import '../data/app_database.dart';
 import '../models/poem.dart';
 import '../services/poem_import_service.dart';
 import '../services/prosody_service.dart';
+import '../theme/app_typography.dart';
 import '../widgets/duplicate_poem_dialog.dart';
 import '../widgets/prosody_calibration_dialog.dart';
 
@@ -241,7 +242,13 @@ class _PoemEditorScreenState extends State<PoemEditorScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: Text(_isEditing ? '编辑诗词' : '添加原创诗词'),
+        title: Text(
+          _isEditing ? '编辑诗词' : '添加原创诗词',
+          style: const TextStyle(
+            fontFamily: kFeiHuaSongTiFontFamily,
+            fontWeight: FontWeight.w700,
+          ),
+        ),
         actions: [
           IconButton(
             tooltip: '导入诗词',
@@ -729,6 +736,7 @@ class _ProsodyEditorSection extends StatelessWidget {
                 label: const Text('人工校准'),
               ),
             ),
+            const SizedBox(height: 14),
             if (showRegulatedFormField) ...[
               DropdownButtonFormField<String>(
                 value: regulatedFormValues.contains(currentForm)
