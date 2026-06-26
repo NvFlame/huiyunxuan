@@ -182,6 +182,170 @@ class HuiyunEmptyState extends StatelessWidget {
   }
 }
 
+class HuiyunCloudArt {
+  const HuiyunCloudArt._();
+
+  static void drawRibbonCloud(
+    Canvas canvas, {
+    required Offset center,
+    required double width,
+    required Color color,
+    double opacity = 1,
+    double strokeWidth = 1.2,
+    bool mirror = false,
+  }) {
+    final height = width * 0.32;
+    final paint = Paint()
+      ..color = color.withOpacity(opacity)
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = strokeWidth
+      ..strokeCap = StrokeCap.round
+      ..strokeJoin = StrokeJoin.round;
+
+    canvas.save();
+    canvas.translate(center.dx, center.dy);
+    if (mirror) {
+      canvas.scale(-1, 1);
+    }
+
+    final outer = Path()
+      ..moveTo(-width * 0.50, height * 0.10)
+      ..cubicTo(
+        -width * 0.36,
+        -height * 0.08,
+        -width * 0.19,
+        -height * 0.12,
+        -width * 0.08,
+        height * 0.02,
+      )
+      ..cubicTo(
+        width * 0.02,
+        height * 0.15,
+        -width * 0.09,
+        height * 0.30,
+        -width * 0.22,
+        height * 0.20,
+      )
+      ..cubicTo(
+        -width * 0.08,
+        height * 0.42,
+        width * 0.19,
+        height * 0.31,
+        width * 0.22,
+        height * 0.06,
+      )
+      ..cubicTo(
+        width * 0.25,
+        -height * 0.14,
+        width * 0.07,
+        -height * 0.22,
+        width * 0.02,
+        -height * 0.05,
+      )
+      ..cubicTo(
+        width * 0.16,
+        -height * 0.26,
+        width * 0.44,
+        -height * 0.08,
+        width * 0.50,
+        height * 0.13,
+      );
+    canvas.drawPath(outer, paint);
+
+    final tail = Path()
+      ..moveTo(width * 0.18, height * 0.22)
+      ..cubicTo(
+        width * 0.33,
+        height * 0.08,
+        width * 0.44,
+        height * 0.08,
+        width * 0.58,
+        height * 0.22,
+      );
+    canvas.drawPath(tail, paint);
+
+    final inner = Path()
+      ..moveTo(-width * 0.12, height * 0.09)
+      ..cubicTo(
+        width * 0.02,
+        height * 0.26,
+        width * 0.20,
+        height * 0.10,
+        width * 0.12,
+        -height * 0.06,
+      )
+      ..cubicTo(
+        width * 0.06,
+        -height * 0.18,
+        -width * 0.08,
+        -height * 0.10,
+        -width * 0.02,
+        height * 0.02,
+      );
+    canvas.drawPath(inner, paint);
+
+    canvas.restore();
+  }
+
+  static void drawCloudWash(
+    Canvas canvas, {
+    required Offset center,
+    required double width,
+    required Color color,
+    double opacity = 0.05,
+    bool mirror = false,
+  }) {
+    final height = width * 0.34;
+    final paint = Paint()
+      ..color = color.withOpacity(opacity)
+      ..style = PaintingStyle.fill;
+
+    canvas.save();
+    canvas.translate(center.dx, center.dy);
+    if (mirror) {
+      canvas.scale(-1, 1);
+    }
+
+    final path = Path()
+      ..moveTo(-width * 0.50, height * 0.16)
+      ..cubicTo(
+        -width * 0.41,
+        -height * 0.16,
+        -width * 0.22,
+        -height * 0.21,
+        -width * 0.11,
+        -height * 0.02,
+      )
+      ..cubicTo(
+        -width * 0.02,
+        -height * 0.34,
+        width * 0.24,
+        -height * 0.32,
+        width * 0.29,
+        -height * 0.03,
+      )
+      ..cubicTo(
+        width * 0.48,
+        -height * 0.07,
+        width * 0.58,
+        height * 0.13,
+        width * 0.45,
+        height * 0.27,
+      )
+      ..cubicTo(
+        width * 0.18,
+        height * 0.38,
+        -width * 0.24,
+        height * 0.36,
+        -width * 0.50,
+        height * 0.16,
+      )
+      ..close();
+    canvas.drawPath(path, paint);
+    canvas.restore();
+  }
+}
+
 class _HuiyunCornerPainter extends CustomPainter {
   const _HuiyunCornerPainter({
     required this.color,
@@ -217,6 +381,18 @@ class _HuiyunCornerPainter extends CustomPainter {
     corner(Offset(size.width - radius, radius), -1, 1);
     corner(Offset(radius, size.height - radius), 1, -1);
     corner(Offset(size.width - radius, size.height - radius), -1, -1);
+
+    if (size.width >= 140 && size.height >= 64) {
+      HuiyunCloudArt.drawRibbonCloud(
+        canvas,
+        center: Offset(size.width - 54, size.height - 26),
+        width: math.min(size.width * 0.26, 92),
+        color: color,
+        opacity: 0.46,
+        strokeWidth: 0.7,
+        mirror: true,
+      );
+    }
   }
 
   @override

@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 
 import 'screens/home_screen.dart';
+import 'widgets/huiyun_visuals.dart';
 
 const appTitle = '绘云轩';
 
@@ -285,9 +286,28 @@ class _HuiyunAppBackdrop extends StatelessWidget {
           ],
         ),
       ),
-      child: CustomPaint(
-        painter: const _HuiyunBackdropPainter(),
-        child: child,
+      child: Stack(
+        fit: StackFit.expand,
+        children: [
+          CustomPaint(
+            painter: const _HuiyunBackdropPainter(),
+          ),
+          const Positioned(
+            right: -86,
+            bottom: 64,
+            child: IgnorePointer(
+              child: Opacity(
+                opacity: 0.075,
+                child: Image(
+                  image: AssetImage('assets/branding/cloud_mark.png'),
+                  width: 330,
+                  fit: BoxFit.contain,
+                ),
+              ),
+            ),
+          ),
+          child,
+        ],
       ),
     );
   }
@@ -305,6 +325,31 @@ class _HuiyunBackdropPainter extends CustomPainter {
       canvas.drawLine(Offset(x, 0), Offset(x + 10, size.height), paperLine);
     }
 
+    HuiyunCloudArt.drawCloudWash(
+      canvas,
+      center: Offset(size.width * 0.78, size.height * 0.15),
+      width: size.shortestSide * 0.50,
+      color: const Color(0xFFD1A84F),
+      opacity: 0.045,
+      mirror: true,
+    );
+    HuiyunCloudArt.drawRibbonCloud(
+      canvas,
+      center: Offset(size.width * 0.74, size.height * 0.16),
+      width: size.shortestSide * 0.42,
+      color: const Color(0xFFC7A65D),
+      opacity: 0.11,
+      strokeWidth: 1.1,
+      mirror: true,
+    );
+    HuiyunCloudArt.drawRibbonCloud(
+      canvas,
+      center: Offset(size.width * 0.22, size.height * 0.44),
+      width: size.shortestSide * 0.34,
+      color: const Color(0xFF8E9278),
+      opacity: 0.07,
+      strokeWidth: 1.0,
+    );
     final mist = Paint()
       ..shader = RadialGradient(
         colors: [

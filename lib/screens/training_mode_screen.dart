@@ -964,17 +964,15 @@ class _TrainingModeScreenState extends State<TrainingModeScreen> {
       onWillPop: _handleBackNavigation,
       child: Scaffold(
         appBar: AppBar(
+          backgroundColor: Colors.transparent,
+          surfaceTintColor: Colors.transparent,
+          shadowColor: Colors.transparent,
           leading: Navigator.canPop(context)
               ? BackButton(
                   onPressed: () => unawaited(_handleLeadingBackPressed()),
                 )
               : null,
-          title: _TrainingTitle(
-            collection: collection,
-            currentIndex: _poems.isEmpty ? 0 : _currentIndex + 1,
-            total: _poems.length,
-            onTapProgress: _poems.isEmpty ? null : _showJumpDialog,
-          ),
+          title: _TrainingTitle(collection: collection),
           actions: [
             if (_phase != _TrainingPhase.confirm) ...[
               PopupMenuButton<TrainingDifficulty>(
@@ -1085,6 +1083,7 @@ class _TrainingModeScreenState extends State<TrainingModeScreen> {
             currentIndex: _currentIndex + 1,
             total: _poems.length,
             achievementLevel: _currentAchievementLevel,
+            onTapProgress: _poems.isEmpty ? null : _showJumpDialog,
             onPrevious: _canGoPrevious
                 ? () => unawaited(_goToIndex(_currentIndex - 1))
                 : null,
@@ -1121,17 +1120,12 @@ class _TrainingModeScreenState extends State<TrainingModeScreen> {
         const SizedBox(height: 16),
         _TrainingOptionSection(
           title: '难度模式',
-          child: SegmentedButton<TrainingDifficulty>(
-            segments: [
-              for (final difficulty in TrainingDifficulty.values)
-                ButtonSegment<TrainingDifficulty>(
-                  value: difficulty,
-                  label: Text(difficulty.label),
-                ),
-            ],
-            selected: {_difficulty},
-            onSelectionChanged: (selected) {
-              unawaited(_setDifficulty(selected.first));
+          child: _TrainingChoiceGroup<TrainingDifficulty>(
+            values: TrainingDifficulty.values,
+            selected: _difficulty,
+            labelBuilder: (difficulty) => difficulty.label,
+            onSelected: (difficulty) {
+              unawaited(_setDifficulty(difficulty));
             },
           ),
           description: _difficulty.description,
@@ -1139,17 +1133,12 @@ class _TrainingModeScreenState extends State<TrainingModeScreen> {
         const SizedBox(height: 16),
         _TrainingOptionSection(
           title: '批改模式',
-          child: SegmentedButton<CorrectionMode>(
-            segments: [
-              for (final mode in CorrectionMode.values)
-                ButtonSegment<CorrectionMode>(
-                  value: mode,
-                  label: Text(mode.label),
-                ),
-            ],
-            selected: {_correctionMode},
-            onSelectionChanged: (selected) {
-              unawaited(_setCorrectionMode(selected.first));
+          child: _TrainingChoiceGroup<CorrectionMode>(
+            values: CorrectionMode.values,
+            selected: _correctionMode,
+            labelBuilder: (mode) => mode.label,
+            onSelected: (mode) {
+              unawaited(_setCorrectionMode(mode));
             },
           ),
           description: _correctionMode.description,
@@ -1530,44 +1519,22 @@ class _TrainingBottomActionButton extends StatelessWidget {
 class _TrainingTitle extends StatelessWidget {
   const _TrainingTitle({
     required this.collection,
-    required this.currentIndex,
-    required this.total,
-    required this.onTapProgress,
   });
 
   final PoemCollection? collection;
-  final int currentIndex;
-  final int total;
-  final VoidCallback? onTapProgress;
 
   @override
   Widget build(BuildContext context) {
     final name = collection?.name ?? '展才';
 
-    return Column(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        Text(
-          name,
-          maxLines: 1,
-          overflow: TextOverflow.ellipsis,
-        ),
-        if (total > 0)
-          InkWell(
-            borderRadius: BorderRadius.circular(6),
-            onTap: onTapProgress,
-            child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
-              child: Text(
-                '$currentIndex / $total',
-                style: Theme.of(context).textTheme.labelMedium?.copyWith(
-                      color: const Color(0xFF4F3B12),
-                      decoration: TextDecoration.underline,
-                    ),
-              ),
-            ),
+    return Text(
+      name,
+      maxLines: 1,
+      overflow: TextOverflow.ellipsis,
+      style: Theme.of(context).appBarTheme.titleTextStyle?.copyWith(
+            fontFamily: kFeiHuaSongTiFontFamily,
+            fontWeight: FontWeight.w700,
           ),
-      ],
     );
   }
 }
@@ -1578,6 +1545,7 @@ class _TrainingProgressCard extends StatelessWidget {
     required this.currentIndex,
     required this.total,
     required this.achievementLevel,
+    required this.onTapProgress,
     required this.onPrevious,
     required this.onNext,
     required this.onSearch,
@@ -1587,6 +1555,7 @@ class _TrainingProgressCard extends StatelessWidget {
   final int currentIndex;
   final int total;
   final int achievementLevel;
+  final VoidCallback? onTapProgress;
   final VoidCallback? onPrevious;
   final VoidCallback? onNext;
   final VoidCallback onSearch;
@@ -1613,10 +1582,17 @@ class _TrainingProgressCard extends StatelessWidget {
               ],
             ),
             const SizedBox(height: 8),
-            Text(
-              '$currentIndex / $total',
-              style: theme.textTheme.headlineSmall?.copyWith(
-                color: const Color(0xFF4F3B12),
+            InkWell(
+              borderRadius: BorderRadius.circular(8),
+              onTap: onTapProgress,
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 2, vertical: 2),
+                child: Text(
+                  '$currentIndex / $total',
+                  style: theme.textTheme.headlineSmall?.copyWith(
+                    color: const Color(0xFF4F3B12),
+                  ),
+                ),
               ),
             ),
             const SizedBox(height: 6),
@@ -1639,13 +1615,13 @@ class _TrainingProgressCard extends StatelessWidget {
             const SizedBox(height: 14),
             Row(
               children: [
-                IconButton.filledTonal(
+                _TrainingNavButton(
                   tooltip: '上一首',
                   onPressed: onPrevious,
                   icon: const Icon(Icons.chevron_left),
                 ),
                 const SizedBox(width: 8),
-                IconButton.filledTonal(
+                _TrainingNavButton(
                   tooltip: '下一首',
                   onPressed: onNext,
                   icon: const Icon(Icons.chevron_right),
@@ -1660,6 +1636,147 @@ class _TrainingProgressCard extends StatelessWidget {
             ),
           ],
         ),
+    );
+  }
+}
+
+class _TrainingNavButton extends StatelessWidget {
+  const _TrainingNavButton({
+    required this.tooltip,
+    required this.onPressed,
+    required this.icon,
+  });
+
+  final String tooltip;
+  final VoidCallback? onPressed;
+  final Widget icon;
+
+  @override
+  Widget build(BuildContext context) {
+    final enabled = onPressed != null;
+    final color = enabled
+        ? const Color(0xFF7B5A05)
+        : HuiyunPalette.inkSoft.withOpacity(0.35);
+
+    return Tooltip(
+      message: tooltip,
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          borderRadius: BorderRadius.circular(10),
+          onTap: onPressed,
+          child: AnimatedContainer(
+            duration: const Duration(milliseconds: 160),
+            width: 42,
+            height: 38,
+            decoration: BoxDecoration(
+              color: enabled
+                  ? const Color(0xFFFFF8E8).withOpacity(0.55)
+                  : Colors.transparent,
+              borderRadius: BorderRadius.circular(10),
+              border: Border.all(
+                color: enabled
+                    ? const Color(0xFFE6C46B).withOpacity(0.82)
+                    : const Color(0xFFE6C46B).withOpacity(0.32),
+              ),
+            ),
+            child: IconTheme.merge(
+              data: IconThemeData(color: color, size: 24),
+              child: icon,
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _TrainingChoiceGroup<T> extends StatelessWidget {
+  const _TrainingChoiceGroup({
+    required this.values,
+    required this.selected,
+    required this.labelBuilder,
+    required this.onSelected,
+  });
+
+  final List<T> values;
+  final T selected;
+  final String Function(T value) labelBuilder;
+  final ValueChanged<T> onSelected;
+
+  @override
+  Widget build(BuildContext context) {
+    return Wrap(
+      spacing: 8,
+      runSpacing: 8,
+      children: [
+        for (final value in values)
+          _TrainingChoiceTile(
+            label: labelBuilder(value),
+            selected: value == selected,
+            onTap: () => onSelected(value),
+          ),
+      ],
+    );
+  }
+}
+
+class _TrainingChoiceTile extends StatelessWidget {
+  const _TrainingChoiceTile({
+    required this.label,
+    required this.selected,
+    required this.onTap,
+  });
+
+  final String label;
+  final bool selected;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final borderColor =
+        selected ? const Color(0xFFC69620) : const Color(0xFFE6C46B);
+    final foreground =
+        selected ? const Color(0xFF4F3B12) : HuiyunPalette.ink;
+
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        borderRadius: BorderRadius.circular(13),
+        onTap: onTap,
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 180),
+          curve: Curves.easeOutCubic,
+          constraints: const BoxConstraints(minWidth: 72),
+          padding: const EdgeInsets.symmetric(horizontal: 15, vertical: 9),
+          decoration: BoxDecoration(
+            color: selected
+                ? const Color(0xFFFFE8AB).withOpacity(0.78)
+                : const Color(0xFFFFFCF1).withOpacity(0.68),
+            borderRadius: BorderRadius.circular(13),
+            border: Border.all(color: borderColor, width: selected ? 1.15 : 1),
+            boxShadow: selected
+                ? const [
+                    BoxShadow(
+                      color: Color(0x1AE0AF38),
+                      blurRadius: 10,
+                      offset: Offset(0, 4),
+                    ),
+                  ]
+                : const [],
+          ),
+          child: Text(
+            label,
+            textAlign: TextAlign.center,
+            style: theme.textTheme.labelLarge?.copyWith(
+              color: foreground,
+              fontWeight: FontWeight.w700,
+              height: 1,
+            ),
+          ),
+        ),
+      ),
     );
   }
 }

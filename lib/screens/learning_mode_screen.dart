@@ -610,7 +610,6 @@ class _LearningModeScreenState extends State<LearningModeScreen> {
   void _jumpToAnnotationLine(int lineNumber, _ParsedAnnotation annotation) {
     final notes = annotation.grouped[lineNumber];
     if (notes == null || notes.isEmpty) {
-      _showSnackBar('第 $lineNumber 行暂无对应注释');
       return;
     }
 
@@ -709,7 +708,6 @@ class _LearningModeScreenState extends State<LearningModeScreen> {
   ) {
     final notes = annotation.grouped[lineNumber];
     if (notes == null || notes.isEmpty) {
-      _showSnackBar('第 $lineNumber 行暂无对应注释');
       return;
     }
 
@@ -1665,7 +1663,6 @@ class _PoemContentViewState extends State<_PoemContentView> {
                                   '$currentLineNumber',
                                   style: theme.textTheme.labelSmall?.copyWith(
                                     color: const Color(0xFF9A7B2F),
-                                    decoration: TextDecoration.underline,
                                   ),
                                 ),
                               ),

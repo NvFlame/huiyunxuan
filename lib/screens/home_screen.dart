@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 
 import '../data/app_database.dart';
 import '../theme/app_typography.dart';
+import '../widgets/huiyun_visuals.dart';
 import 'api_settings_screen.dart';
 import 'collection_list_screen.dart';
 import 'learning_mode_screen.dart';
@@ -61,9 +62,26 @@ class _HomeScreenState extends State<HomeScreen> {
             ],
           ),
         ),
-        child: CustomPaint(
-          painter: const _HomeBackgroundPainter(),
-          child: SafeArea(
+        child: Stack(
+          fit: StackFit.expand,
+          children: [
+            const Positioned(
+              right: -112,
+              bottom: 96,
+              child: IgnorePointer(
+                child: Opacity(
+                  opacity: 0.105,
+                  child: Image(
+                    image: AssetImage('assets/branding/cloud_mark.png'),
+                    width: 390,
+                    fit: BoxFit.contain,
+                  ),
+                ),
+              ),
+            ),
+            CustomPaint(
+              painter: const _HomeBackgroundPainter(),
+              child: SafeArea(
             child: Column(
               children: [
                 const _HomeTitleMark(),
@@ -115,7 +133,9 @@ class _HomeScreenState extends State<HomeScreen> {
                 ),
               ],
             ),
-          ),
+              ),
+            ),
+          ],
         ),
       ),
     );
@@ -191,6 +211,24 @@ class _HomeTitleMistPainter extends CustomPainter {
       Offset(size.width * 0.78, size.height * 0.76),
       brush,
     );
+
+    HuiyunCloudArt.drawRibbonCloud(
+      canvas,
+      center: Offset(size.width * 0.24, size.height * 0.62),
+      width: math.min(size.width * 0.28, 128),
+      color: const Color(0xFFC7A65D),
+      opacity: 0.24,
+      strokeWidth: 1.0,
+    );
+    HuiyunCloudArt.drawRibbonCloud(
+      canvas,
+      center: Offset(size.width * 0.76, size.height * 0.63),
+      width: math.min(size.width * 0.28, 128),
+      color: const Color(0xFFC7A65D),
+      opacity: 0.20,
+      strokeWidth: 1.0,
+      mirror: true,
+    );
   }
 
   @override
@@ -250,6 +288,32 @@ class _HomeBackgroundPainter extends CustomPainter {
       rightMist,
     );
 
+    HuiyunCloudArt.drawCloudWash(
+      canvas,
+      center: Offset(size.width * 0.72, size.height * 0.30),
+      width: size.width * 0.42,
+      color: const Color(0xFFD5B66C),
+      opacity: 0.05,
+      mirror: true,
+    );
+    HuiyunCloudArt.drawRibbonCloud(
+      canvas,
+      center: Offset(size.width * 0.76, size.height * 0.31),
+      width: size.width * 0.34,
+      color: const Color(0xFFC7A65D),
+      opacity: 0.12,
+      strokeWidth: 1.1,
+      mirror: true,
+    );
+    HuiyunCloudArt.drawRibbonCloud(
+      canvas,
+      center: Offset(size.width * 0.24, size.height * 0.46),
+      width: size.width * 0.32,
+      color: const Color(0xFF8E9278),
+      opacity: 0.08,
+      strokeWidth: 1.0,
+    );
+
     final warmInk = Paint()
       ..shader = RadialGradient(
         colors: [
@@ -300,31 +364,6 @@ class _HomeBackgroundPainter extends CustomPainter {
         size.height * 0.5,
       );
     canvas.drawPath(mountainPath, mountainPaint);
-
-    final cloudPaint = Paint()
-      ..color = const Color(0xFFBCA25D).withOpacity(0.08)
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = 2.0
-      ..strokeCap = StrokeCap.round;
-    final cloudPath = Path()
-      ..moveTo(size.width * 0.08, size.height * 0.78)
-      ..cubicTo(
-        size.width * 0.24,
-        size.height * 0.72,
-        size.width * 0.34,
-        size.height * 0.84,
-        size.width * 0.5,
-        size.height * 0.78,
-      )
-      ..cubicTo(
-        size.width * 0.66,
-        size.height * 0.72,
-        size.width * 0.76,
-        size.height * 0.82,
-        size.width * 0.94,
-        size.height * 0.76,
-      );
-    canvas.drawPath(cloudPath, cloudPaint);
 
     final sealPaint = Paint()
       ..color = const Color(0xFF9A5B3D).withOpacity(0.035)
@@ -641,7 +680,7 @@ class _HomeCompassTile extends StatelessWidget {
                 ),
                 Positioned.fill(
                   child: CustomPaint(
-                    painter: const _TileFiberPainter(),
+                    painter: _TileFiberPainter(accentColor: accentColor),
                   ),
                 ),
                 Text(
@@ -665,7 +704,9 @@ class _HomeCompassTile extends StatelessWidget {
 }
 
 class _TileFiberPainter extends CustomPainter {
-  const _TileFiberPainter();
+  const _TileFiberPainter({required this.accentColor});
+
+  final Color accentColor;
 
   @override
   void paint(Canvas canvas, Size size) {
@@ -682,10 +723,21 @@ class _TileFiberPainter extends CustomPainter {
       Offset(size.width * 0.88, size.height * 0.74),
       paint,
     );
+
+    HuiyunCloudArt.drawRibbonCloud(
+      canvas,
+      center: Offset(size.width * 0.50, size.height * 0.53),
+      width: size.width * 0.56,
+      color: accentColor,
+      opacity: 0.11,
+      strokeWidth: 0.9,
+    );
   }
 
   @override
-  bool shouldRepaint(covariant _TileFiberPainter oldDelegate) => false;
+  bool shouldRepaint(covariant _TileFiberPainter oldDelegate) {
+    return oldDelegate.accentColor != accentColor;
+  }
 }
 
 class _JinshiDiamond extends StatelessWidget {
@@ -715,7 +767,7 @@ class _JinshiDiamond extends StatelessWidget {
       height: size,
       child: Semantics(
         button: true,
-        label: '默诵值',
+        label: '既成',
         child: GestureDetector(
           behavior: HitTestBehavior.opaque,
           onTap: onTap,
@@ -732,21 +784,47 @@ class _JinshiDiamond extends StatelessWidget {
                       begin: Alignment.topLeft,
                       end: Alignment.bottomRight,
                       colors: [
-                        Color(0xFFFFFFF6),
-                        Color(0xFFFFF0BF),
+                        Color(0xFFFFFFFF),
+                        Color(0xFFF9F5EC),
                       ],
                     ),
                     border: Border.all(
-                      color: primary.withOpacity(0.72),
-                      width: 1.2,
+                      color: primary.withOpacity(0.58),
+                      width: 1.1,
                     ),
                     boxShadow: [
                       BoxShadow(
-                        color: const Color(0xFF6D5318).withOpacity(0.09),
-                        blurRadius: 18,
-                        offset: const Offset(0, 8),
+                        color: const Color(0xFF6D5318).withOpacity(0.07),
+                        blurRadius: 20,
+                        offset: const Offset(0, 9),
+                      ),
+                      BoxShadow(
+                        color: Colors.white.withOpacity(0.72),
+                        blurRadius: 8,
+                        offset: const Offset(-3, -3),
                       ),
                     ],
+                  ),
+                ),
+              ),
+              Transform.rotate(
+                angle: math.pi / 4,
+                child: ClipRect(
+                  child: SizedBox(
+                    width: size * 0.62,
+                    height: size * 0.62,
+                    child: Transform.rotate(
+                      angle: -math.pi / 4,
+                      child: Opacity(
+                        opacity: 0.12,
+                        child: Image.asset(
+                          'assets/branding/cloud_mark.png',
+                          fit: BoxFit.cover,
+                          color: const Color(0xFFD1A34A),
+                          colorBlendMode: BlendMode.srcIn,
+                        ),
+                      ),
+                    ),
                   ),
                 ),
               ),
@@ -757,21 +835,16 @@ class _JinshiDiamond extends StatelessWidget {
                   height: size * 0.58,
                   decoration: BoxDecoration(
                     border: Border.all(
-                      color: const Color(0xFFE8C86B).withOpacity(0.72),
+                      color: const Color(0xFFE7D8B5).withOpacity(0.82),
                       width: 0.9,
                     ),
                   ),
                 ),
               ),
-              Icon(
-                Icons.workspace_premium_outlined,
-                size: size * 0.5,
-                color: primary.withOpacity(0.05),
-              ),
               Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  Text('默诵值', style: labelStyle),
+                  Text('既成', style: labelStyle),
                   const SizedBox(height: 4),
                   Text(
                     points == null ? '...' : points.toString(),
