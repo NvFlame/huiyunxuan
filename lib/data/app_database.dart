@@ -8,6 +8,7 @@ import 'package:sqflite/sqflite.dart';
 import '../models/api_config.dart';
 import '../models/poem.dart';
 import '../models/poem_collection.dart';
+import '../services/poem_fingerprint_service.dart';
 import '../services/prosody_service.dart';
 
 class JinshiAchievementEntry {
@@ -24,7 +25,7 @@ class AppDatabase {
   AppDatabase._();
 
   static final AppDatabase instance = AppDatabase._();
-  static const int schemaVersion = 17;
+  static const int schemaVersion = 19;
   static const List<String> backupTableNames = [
     'poem_collections',
     'poem_elements',
@@ -214,6 +215,15 @@ AND search_api_key != ''
         if (oldVersion < 17) {
           await _ensureBuiltInCollections(db);
         }
+        if (oldVersion < 18) {
+          await _normalizeProsodyMetadata(db);
+        }
+        if (oldVersion >= 3 && oldVersion < 19) {
+          await _addPoemFingerprintColumns(db);
+        }
+        if (oldVersion < 19) {
+          await _backfillPoemFingerprints(db);
+        }
       },
     );
   }
@@ -287,6 +297,9 @@ CREATE TABLE poem_elements (
   prosody_overrides_json TEXT NOT NULL DEFAULT '',
   prosody_verified_at INTEGER,
   prosody_verified_by TEXT NOT NULL DEFAULT '',
+  exact_content_hash TEXT NOT NULL DEFAULT '',
+  work_fingerprint TEXT NOT NULL DEFAULT '',
+  content_shape_hash TEXT NOT NULL DEFAULT '',
   created_at INTEGER NOT NULL,
   updated_at INTEGER NOT NULL
 )
@@ -322,6 +335,35 @@ CREATE TABLE collection_poems (
     await db.execute(
       'CREATE INDEX idx_poem_elements_author ON poem_elements(author)',
     );
+    await _createPoemFingerprintIndexes(db);
+  }
+
+  Future<void> _createPoemFingerprintIndexes(DatabaseExecutor db) async {
+    await db.execute(
+      'CREATE INDEX IF NOT EXISTS idx_poem_elements_exact_content_hash '
+      'ON poem_elements(exact_content_hash)',
+    );
+    await db.execute(
+      'CREATE INDEX IF NOT EXISTS idx_poem_elements_work_fingerprint '
+      'ON poem_elements(work_fingerprint)',
+    );
+    await db.execute(
+      'CREATE INDEX IF NOT EXISTS idx_poem_elements_content_shape_hash '
+      'ON poem_elements(content_shape_hash)',
+    );
+  }
+
+  Future<void> _addPoemFingerprintColumns(DatabaseExecutor db) async {
+    await db.execute(
+      "ALTER TABLE poem_elements ADD COLUMN exact_content_hash TEXT NOT NULL DEFAULT ''",
+    );
+    await db.execute(
+      "ALTER TABLE poem_elements ADD COLUMN work_fingerprint TEXT NOT NULL DEFAULT ''",
+    );
+    await db.execute(
+      "ALTER TABLE poem_elements ADD COLUMN content_shape_hash TEXT NOT NULL DEFAULT ''",
+    );
+    await _createPoemFingerprintIndexes(db);
   }
 
   Future<void> _ensureBuiltInCollections(DatabaseExecutor db) async {
@@ -482,6 +524,10 @@ CREATE TABLE collection_poems (
                   _seedProsodyValue(data, 'prosody_enabled'),
             ) ??
             (hasProsodyMetadata ? true : inferredProsody.enabled));
+    final fingerprint = buildPoemFingerprint(
+      author: _seedString(data['author']),
+      content: _seedString(data['content']),
+    );
 
     final poem = Poem(
       collectionId: collectionId,
@@ -509,6 +555,9 @@ CREATE TABLE collection_poems (
       prosodyOverridesJson: prosodyOverrides,
       prosodyVerifiedAt: prosodyVerifiedAt,
       prosodyVerifiedBy: prosodyVerifiedBy,
+      exactContentHash: fingerprint.exactContentHash,
+      workFingerprint: fingerprint.workFingerprint,
+      contentShapeHash: fingerprint.contentShapeHash,
       createdAt: now,
       updatedAt: now,
     );
@@ -681,6 +730,7 @@ CREATE TABLE IF NOT EXISTS learning_progress (
       "UPDATE poem_elements SET prosody_note = REPLACE(prosody_note, '候选', '') "
       "WHERE prosody_note LIKE '%候选%'",
     );
+    await _refreshStaleCiProsodyNotes(db);
     final rows = await db.query(
       'poem_elements',
       columns: ['id', 'dynasty', 'prosody_system', 'prosody_rhyme_book'],
@@ -706,6 +756,77 @@ CREATE TABLE IF NOT EXISTS learning_progress (
           whereArgs: [id],
         );
       }
+    }
+  }
+
+  Future<void> _refreshStaleCiProsodyNotes(Database db) async {
+    final rows = await db.query(
+      'poem_elements',
+      columns: [
+        'id',
+        'title',
+        'dynasty',
+        'content',
+        'remark',
+        'prosody_note',
+      ],
+      where: 'prosody_system = ?',
+      whereArgs: [Poem.prosodySystemCi],
+    );
+    for (final row in rows) {
+      final id = row['id'];
+      if (id is! int) {
+        continue;
+      }
+      final note = (row['prosody_note'] as String?) ?? '';
+      if (!isStaleUnsupportedCiProsodyNote(note)) {
+        continue;
+      }
+      final metadata = inferProsodyMetadata(
+        title: (row['title'] as String?) ?? '',
+        dynasty: (row['dynasty'] as String?) ?? '',
+        content: (row['content'] as String?) ?? '',
+        remark: (row['remark'] as String?) ?? '',
+      );
+      if (metadata.system != Poem.prosodySystemCi ||
+          isStaleUnsupportedCiProsodyNote(metadata.note)) {
+        continue;
+      }
+      await db.update(
+        'poem_elements',
+        {
+          'prosody_supported': metadata.supported ? 1 : 0,
+          'prosody_enabled': metadata.enabled ? 1 : 0,
+          'prosody_form': metadata.form,
+          'prosody_rhyme_book': metadata.rhymeBook,
+          'prosody_note': metadata.note,
+        },
+        where: 'id = ?',
+        whereArgs: [id],
+      );
+    }
+  }
+
+  Future<void> _backfillPoemFingerprints(DatabaseExecutor db) async {
+    final rows = await db.query(
+      'poem_elements',
+      columns: ['id', 'author', 'content'],
+    );
+    for (final row in rows) {
+      final id = row['id'];
+      if (id is! int) {
+        continue;
+      }
+      final fingerprint = buildPoemFingerprint(
+        author: (row['author'] as String?) ?? '',
+        content: (row['content'] as String?) ?? '',
+      );
+      await db.update(
+        'poem_elements',
+        fingerprint.toMap(),
+        where: 'id = ?',
+        whereArgs: [id],
+      );
     }
   }
 
@@ -1197,6 +1318,7 @@ ORDER BY ta.first_jinshi_at DESC, pe.title ASC
         }
       }
       await _backfillCollectionPoemSortOrder(txn);
+      await _backfillPoemFingerprints(txn);
     });
   }
 
@@ -1461,6 +1583,99 @@ ORDER BY cp.sort_order ASC, cp.created_at ASC, pe.title ASC
     return rows.map(Poem.fromMap).toList();
   }
 
+  Future<List<DuplicatePoemCandidate>> findPotentialDuplicatePoems({
+    required String author,
+    required String content,
+    int? excludePoemId,
+    int limit = 8,
+  }) async {
+    final fingerprint = buildPoemFingerprint(author: author, content: content);
+    final conditions = <String>[];
+    final args = <Object?>[];
+    if (excludePoemId != null) {
+      conditions.add('pe.id != ?');
+      args.add(excludePoemId);
+    }
+    final duplicateConditions = <String>[];
+    if (fingerprint.exactContentHash.isNotEmpty) {
+      duplicateConditions.add('pe.exact_content_hash = ?');
+      args.add(fingerprint.exactContentHash);
+    }
+    if (fingerprint.workFingerprint.isNotEmpty) {
+      duplicateConditions.add('pe.work_fingerprint = ?');
+      args.add(fingerprint.workFingerprint);
+    }
+    if (fingerprint.contentShapeHash.isNotEmpty) {
+      duplicateConditions.add('pe.content_shape_hash = ?');
+      args.add(fingerprint.contentShapeHash);
+    }
+    if (duplicateConditions.isEmpty) {
+      return const <DuplicatePoemCandidate>[];
+    }
+    conditions.add('(${duplicateConditions.join(' OR ')})');
+
+    final db = await database;
+    final rows = await db.rawQuery(
+      '''
+SELECT pe.*,
+  COALESCE(MIN(cp.collection_id), 0) AS collection_id,
+  GROUP_CONCAT(DISTINCT pc.name) AS collection_names
+FROM poem_elements pe
+LEFT JOIN collection_poems cp ON cp.poem_id = pe.id
+LEFT JOIN poem_collections pc ON pc.id = cp.collection_id
+WHERE ${conditions.join(' AND ')}
+GROUP BY pe.id
+LIMIT ?
+''',
+      [...args, limit],
+    );
+
+    final candidates = <DuplicatePoemCandidate>[];
+    for (final row in rows) {
+      final exactHash = (row['exact_content_hash'] as String?) ?? '';
+      final workHash = (row['work_fingerprint'] as String?) ?? '';
+      final shapeHash = (row['content_shape_hash'] as String?) ?? '';
+      late final DuplicatePoemMatchLevel level;
+      late final String reason;
+      if (fingerprint.exactContentHash.isNotEmpty &&
+          exactHash == fingerprint.exactContentHash) {
+        level = DuplicatePoemMatchLevel.exact;
+        reason = '正文几乎一致';
+      } else if (fingerprint.workFingerprint.isNotEmpty &&
+          workHash == fingerprint.workFingerprint) {
+        level = DuplicatePoemMatchLevel.work;
+        reason = '作者与首末句一致';
+      } else if (fingerprint.contentShapeHash.isNotEmpty &&
+          shapeHash == fingerprint.contentShapeHash) {
+        level = DuplicatePoemMatchLevel.shape;
+        reason = '首末句与结构相近';
+      } else {
+        continue;
+      }
+      final collectionNames = ((row['collection_names'] as String?) ?? '')
+          .split(',')
+          .map((item) => item.trim())
+          .where((item) => item.isNotEmpty)
+          .toList(growable: false);
+      candidates.add(
+        DuplicatePoemCandidate(
+          poem: Poem.fromMap(row),
+          collectionNames: collectionNames,
+          reason: reason,
+          level: level,
+        ),
+      );
+    }
+    candidates.sort((a, b) {
+      final levelCompare = a.level.index.compareTo(b.level.index);
+      if (levelCompare != 0) {
+        return levelCompare;
+      }
+      return b.poem.updatedAt.compareTo(a.poem.updatedAt);
+    });
+    return candidates.take(limit).toList(growable: false);
+  }
+
   Future<int> getCollectionPoemCount(int collectionId) async {
     final db = await database;
     final rows = await db.rawQuery(
@@ -1556,6 +1771,10 @@ LIMIT 1
                 resolvedSystem != Poem.prosodySystemUnsupported
             ? true
             : inferredProsody.supported);
+    final fingerprint = buildPoemFingerprint(
+      author: author,
+      content: content,
+    );
     final poem = Poem(
       collectionId: collectionId,
       identity: _generatePoemIdentity(),
@@ -1587,6 +1806,9 @@ LIMIT 1
       prosodyOverridesJson: prosodyOverridesJson.trim(),
       prosodyVerifiedAt: prosodyVerifiedAt,
       prosodyVerifiedBy: prosodyVerifiedBy.trim(),
+      exactContentHash: fingerprint.exactContentHash,
+      workFingerprint: fingerprint.workFingerprint,
+      contentShapeHash: fingerprint.contentShapeHash,
       createdAt: now,
       updatedAt: now,
     );
@@ -1613,7 +1835,13 @@ LIMIT 1
       throw ArgumentError('Cannot update a poem without an id.');
     }
 
-    final updatedPoem = poem.copyWith(updatedAt: DateTime.now());
+    final fingerprint = buildPoemFingerprintFromPoem(poem);
+    final updatedPoem = poem.copyWith(
+      exactContentHash: fingerprint.exactContentHash,
+      workFingerprint: fingerprint.workFingerprint,
+      contentShapeHash: fingerprint.contentShapeHash,
+      updatedAt: DateTime.now(),
+    );
     final db = await database;
     await db.update(
       'poem_elements',

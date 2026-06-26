@@ -3,7 +3,11 @@ import 'package:flutter/material.dart';
 import '../data/app_database.dart';
 import '../models/poem_collection.dart';
 import '../services/poem_collection_export_service.dart';
+import '../services/poem_fingerprint_service.dart';
 import '../services/poem_import_service.dart';
+import '../theme/app_typography.dart';
+import '../widgets/duplicate_poem_dialog.dart';
+import '../widgets/huiyun_visuals.dart';
 import 'poem_agent_chat_screen.dart';
 import 'poem_list_screen.dart';
 
@@ -83,6 +87,11 @@ class _CollectionListScreenState extends State<CollectionListScreen> {
       return;
     }
 
+    final shouldContinue = await _confirmCollectionImportDuplicates(result);
+    if (!shouldContinue) {
+      return;
+    }
+
     final collectionId = await AppDatabase.instance.createCollection(
       name: result.collection.name,
       description: result.collection.description,
@@ -127,6 +136,33 @@ class _CollectionListScreenState extends State<CollectionListScreen> {
           ),
         );
     }
+  }
+
+  Future<bool> _confirmCollectionImportDuplicates(
+    _CollectionImportResult result,
+  ) async {
+    final candidatesById = <int, DuplicatePoemCandidate>{};
+    for (final poem in result.collection.poems) {
+      final candidates = await AppDatabase.instance.findPotentialDuplicatePoems(
+        author: poem.author,
+        content: poem.content,
+        limit: 3,
+      );
+      for (final candidate in candidates) {
+        final id = candidate.poem.id;
+        if (id != null) {
+          candidatesById[id] = candidate;
+        }
+      }
+    }
+    if (!mounted) {
+      return false;
+    }
+    return confirmPotentialDuplicatePoems(
+      context: context,
+      candidates: candidatesById.values.toList(growable: false),
+      title: '导入前发现疑似重复',
+    );
   }
 
   Future<void> _deleteCollection(PoemCollection collection) async {
@@ -276,13 +312,21 @@ class _CollectionListScreenState extends State<CollectionListScreen> {
               itemBuilder: (context, index) {
                 final collection = collections[index];
                 final isExporting = _exportingCollectionId == collection.id;
-                return Card(
-                  child: ListTile(
+                return HuiyunPageEntrance(
+                  index: index,
+                  child: HuiyunPaperCard(
+                    onTap: () => _openCollection(collection),
+                    padding: EdgeInsets.zero,
+                    child: ListTile(
                     leading: const Icon(Icons.folder_outlined),
                     title: Text(
                       collection.name,
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
+                      style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                        fontFamily: kFeiHuaSongTiFontFamily,
+                        fontWeight: FontWeight.w700,
+                      ),
                     ),
                     subtitle: collection.description.isEmpty
                         ? const Text('诗词训练库')
@@ -334,7 +378,7 @@ class _CollectionListScreenState extends State<CollectionListScreen> {
                         ),
                       ],
                     ),
-                    onTap: () => _openCollection(collection),
+                    ),
                   ),
                 );
               },
@@ -673,25 +717,10 @@ class _MessageView extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    return Center(
-      child: Padding(
-        padding: const EdgeInsets.all(24),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(icon, size: 48, color: theme.colorScheme.primary),
-            const SizedBox(height: 16),
-            Text(title, style: theme.textTheme.titleMedium),
-            const SizedBox(height: 8),
-            Text(
-              message,
-              textAlign: TextAlign.center,
-              style: theme.textTheme.bodyMedium,
-            ),
-          ],
-        ),
-      ),
+    return HuiyunEmptyState(
+      icon: icon,
+      title: title,
+      message: message,
     );
   }
 }

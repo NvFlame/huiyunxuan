@@ -6,10 +6,12 @@ import '../models/poem.dart';
 import '../models/poem_collection.dart';
 import '../services/openai_api_service.dart';
 import '../services/poem_agent_service.dart';
+import '../services/poem_fingerprint_service.dart';
 import '../services/poem_text_format_service.dart';
 import '../services/prosody_ai_service.dart';
 import '../services/prosody_service.dart';
 import '../services/web_search_service.dart';
+import '../widgets/duplicate_poem_dialog.dart';
 
 class PoemAgentChatScreen extends StatefulWidget {
   const PoemAgentChatScreen({
@@ -408,6 +410,11 @@ class _PoemAgentChatScreenState extends State<PoemAgentChatScreen> {
       _addAssistantMessage('模型返回的《${draft.title}》注释无法处理，所以我没有写入。\n\n${annotationCheck.blockingError}');
       return;
     }
+    final shouldContinue = await _confirmDraftDuplicates([draft]);
+    if (!shouldContinue) {
+      _addAssistantMessage('已取消写入，未向诗词库添加新的诗词。');
+      return;
+    }
 
     final poemId = await AppDatabase.instance.createPoem(
       collectionId: collectionId,
@@ -511,6 +518,11 @@ class _PoemAgentChatScreenState extends State<PoemAgentChatScreen> {
         return;
       }
     }
+    final shouldContinue = await _confirmDraftDuplicates(drafts);
+    if (!shouldContinue) {
+      _addAssistantMessage('已取消写入，未向诗词库添加新的诗词。');
+      return;
+    }
 
     final prosodyCalibrationMessages = <String>[];
     final createdPoemTitlesById = <int, String>{};
@@ -598,6 +610,52 @@ class _PoemAgentChatScreenState extends State<PoemAgentChatScreen> {
       return null;
     }
     return '入库核验未通过：${missingTitles.join('、')} 没有出现在目标诗词库中，请重新添加或检查数据库状态。';
+  }
+
+  Future<bool> _confirmDraftDuplicates(List<PoemAgentDraft> drafts) async {
+    final candidatesById = <int, DuplicatePoemCandidate>{};
+    for (final draft in drafts) {
+      final candidates = await AppDatabase.instance.findPotentialDuplicatePoems(
+        author: draft.author,
+        content: draft.content,
+        limit: 3,
+      );
+      for (final candidate in candidates) {
+        final id = candidate.poem.id;
+        if (id != null) {
+          candidatesById[id] = candidate;
+        }
+      }
+    }
+    if (!mounted) {
+      return false;
+    }
+    return confirmPotentialDuplicatePoems(
+      context: context,
+      candidates: candidatesById.values.toList(growable: false),
+      title: drafts.length > 1 ? '批量添加前发现疑似重复' : '添加前发现疑似重复',
+    );
+  }
+
+  Future<bool> _confirmPoemDuplicates({
+    required String author,
+    required String content,
+    int? excludePoemId,
+    required String title,
+  }) async {
+    final candidates = await AppDatabase.instance.findPotentialDuplicatePoems(
+      author: author,
+      content: content,
+      excludePoemId: excludePoemId,
+    );
+    if (!mounted) {
+      return false;
+    }
+    return confirmPotentialDuplicatePoems(
+      context: context,
+      candidates: candidates,
+      title: title,
+    );
   }
 
   Future<String?> _autoCalibrateProsody(int poemId, int collectionId) async {
@@ -717,6 +775,19 @@ class _PoemAgentChatScreenState extends State<PoemAgentChatScreen> {
       );
       if (annotationError != null) {
         _addAssistantMessage('模型返回的注释格式不符合规范，所以我没有写入。\n\n$annotationError');
+        return;
+      }
+    }
+    if (updates.values.containsKey('content') ||
+        updates.values.containsKey('author')) {
+      final shouldContinue = await _confirmPoemDuplicates(
+        author: updatedPoem.author,
+        content: updatedPoem.content,
+        excludePoemId: updatedPoem.id,
+        title: '修改后发现疑似重复',
+      );
+      if (!shouldContinue) {
+        _addAssistantMessage('已取消写入，未修改诗词库内容。');
         return;
       }
     }

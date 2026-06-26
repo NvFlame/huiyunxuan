@@ -22,6 +22,9 @@ class Poem {
     this.prosodyOverridesJson = '',
     this.prosodyVerifiedAt,
     this.prosodyVerifiedBy = '',
+    this.exactContentHash = '',
+    this.workFingerprint = '',
+    this.contentShapeHash = '',
     required this.createdAt,
     required this.updatedAt,
   });
@@ -58,6 +61,9 @@ class Poem {
   final String prosodyOverridesJson;
   final DateTime? prosodyVerifiedAt;
   final String prosodyVerifiedBy;
+  final String exactContentHash;
+  final String workFingerprint;
+  final String contentShapeHash;
   final DateTime createdAt;
   final DateTime updatedAt;
 
@@ -84,6 +90,9 @@ class Poem {
     String? prosodyOverridesJson,
     DateTime? prosodyVerifiedAt,
     String? prosodyVerifiedBy,
+    String? exactContentHash,
+    String? workFingerprint,
+    String? contentShapeHash,
     bool clearProsodyVerification = false,
     DateTime? createdAt,
     DateTime? updatedAt,
@@ -117,6 +126,9 @@ class Poem {
       prosodyVerifiedBy: clearProsodyVerification
           ? ''
           : (prosodyVerifiedBy ?? this.prosodyVerifiedBy),
+      exactContentHash: exactContentHash ?? this.exactContentHash,
+      workFingerprint: workFingerprint ?? this.workFingerprint,
+      contentShapeHash: contentShapeHash ?? this.contentShapeHash,
       createdAt: createdAt ?? this.createdAt,
       updatedAt: updatedAt ?? this.updatedAt,
     );
@@ -145,6 +157,9 @@ class Poem {
       'prosody_overrides_json': prosodyOverridesJson,
       'prosody_verified_at': prosodyVerifiedAt?.millisecondsSinceEpoch,
       'prosody_verified_by': prosodyVerifiedBy,
+      'exact_content_hash': exactContentHash,
+      'work_fingerprint': workFingerprint,
+      'content_shape_hash': contentShapeHash,
       'created_at': createdAt.millisecondsSinceEpoch,
       'updated_at': updatedAt.millisecondsSinceEpoch,
     };
@@ -175,6 +190,9 @@ class Poem {
       prosodyOverridesJson: (map['prosody_overrides_json'] as String?) ?? '',
       prosodyVerifiedAt: _nullableDateFromMap(map['prosody_verified_at']),
       prosodyVerifiedBy: (map['prosody_verified_by'] as String?) ?? '',
+      exactContentHash: (map['exact_content_hash'] as String?) ?? '',
+      workFingerprint: (map['work_fingerprint'] as String?) ?? '',
+      contentShapeHash: (map['content_shape_hash'] as String?) ?? '',
       createdAt: _dateFromMap(map['created_at']),
       updatedAt: _dateFromMap(map['updated_at']),
     );

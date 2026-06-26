@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../data/app_database.dart';
 import '../models/api_config.dart';
 import '../services/app_backup_service.dart';
+import '../widgets/huiyun_visuals.dart';
 import 'api_config_editor_screen.dart';
 
 class ApiSettingsScreen extends StatefulWidget {
@@ -321,11 +322,14 @@ class _ApiSettingsScreenState extends State<ApiSettingsScreen> {
                     itemCount: configs.length,
                     itemBuilder: (context, index) {
                       final config = configs[index];
-                      return _ApiConfigCard(
-                        config: config,
-                        onTap: () => _openEditor(config: config),
-                        onSelect: () => _setActive(config),
-                        onDelete: () => _deleteConfig(config),
+                      return HuiyunPageEntrance(
+                        index: index,
+                        child: _ApiConfigCard(
+                          config: config,
+                          onTap: () => _openEditor(config: config),
+                          onSelect: () => _setActive(config),
+                          onDelete: () => _deleteConfig(config),
+                        ),
                       );
                     },
                   ),
@@ -375,13 +379,10 @@ class _ApiConfigCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
 
-    return Card(
-      child: InkWell(
-        borderRadius: BorderRadius.circular(8),
-        onTap: onTap,
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(16, 16, 8, 16),
-          child: Row(
+    return HuiyunPaperCard(
+      onTap: onTap,
+      padding: const EdgeInsets.fromLTRB(16, 16, 8, 16),
+      child: Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Expanded(
@@ -476,8 +477,6 @@ class _ApiConfigCard extends StatelessWidget {
               ),
             ],
           ),
-        ),
-      ),
     );
   }
 }
@@ -527,26 +526,10 @@ class _ApiMessageView extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-
-    return Center(
-      child: Padding(
-        padding: const EdgeInsets.all(24),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(icon, size: 48, color: theme.colorScheme.primary),
-            const SizedBox(height: 16),
-            Text(title, style: theme.textTheme.titleMedium),
-            const SizedBox(height: 8),
-            Text(
-              message,
-              textAlign: TextAlign.center,
-              style: theme.textTheme.bodyMedium,
-            ),
-          ],
-        ),
-      ),
+    return HuiyunEmptyState(
+      icon: icon,
+      title: title,
+      message: message,
     );
   }
 }

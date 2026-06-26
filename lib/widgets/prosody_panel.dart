@@ -33,7 +33,7 @@ class ProsodyPanel extends StatelessWidget {
     final theme = Theme.of(context);
     final form = poem.prosodyForm.trim();
     final rhymeBook = poem.prosodyRhymeBook.trim();
-    final note = poem.prosodyNote.trim();
+    final rawNote = poem.prosodyNote.trim();
     final verificationLabel = _verificationLabel(poem);
     final rhymeAnalysis = analyzeRhyme(poem);
     final regulatedCheck = checkRegulatedVerse(poem);
@@ -63,6 +63,11 @@ class ProsodyPanel extends StatelessWidget {
             : false;
     final unsupportedCiPattern =
         ciCheck.applicable && !ciCheck.supportedPattern;
+    final note = ciCheck.applicable &&
+            ciCheck.supportedPattern &&
+            isStaleUnsupportedCiProsodyNote(rawNote)
+        ? ''
+        : rawNote;
     final usesCiPatternRhyme = ciCheck.applicable && ciCheck.supportedPattern;
     final primaryRhyme = unsupportedCiPattern
         ? ''

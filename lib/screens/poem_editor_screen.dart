@@ -4,6 +4,7 @@ import '../data/app_database.dart';
 import '../models/poem.dart';
 import '../services/poem_import_service.dart';
 import '../services/prosody_service.dart';
+import '../widgets/duplicate_poem_dialog.dart';
 import '../widgets/prosody_calibration_dialog.dart';
 
 class PoemEditorScreen extends StatefulWidget {
@@ -112,6 +113,19 @@ class _PoemEditorScreenState extends State<PoemEditorScreen> {
         clearProsodyVerification ? null : _prosodyVerifiedAt;
     final prosodyVerifiedBy =
         clearProsodyVerification ? '' : _prosodyVerifiedBy;
+    final shouldContinue = await _confirmNoDuplicate(
+      author: _authorController.text,
+      content: _contentController.text,
+      excludePoemId: existing?.id,
+    );
+    if (!shouldContinue) {
+      if (mounted) {
+        setState(() {
+          _saving = false;
+        });
+      }
+      return;
+    }
 
     if (existing == null) {
       await database.createPoem(
@@ -166,6 +180,26 @@ class _PoemEditorScreenState extends State<PoemEditorScreen> {
     if (mounted) {
       Navigator.pop(context, true);
     }
+  }
+
+  Future<bool> _confirmNoDuplicate({
+    required String author,
+    required String content,
+    int? excludePoemId,
+  }) async {
+    final candidates = await AppDatabase.instance.findPotentialDuplicatePoems(
+      author: author,
+      content: content,
+      excludePoemId: excludePoemId,
+    );
+    if (!mounted) {
+      return false;
+    }
+    return confirmPotentialDuplicatePoems(
+      context: context,
+      candidates: candidates,
+      title: '发现疑似重复作品',
+    );
   }
 
   Future<void> _importPoemDraft() async {
@@ -497,7 +531,13 @@ class _PoemEditorScreenState extends State<PoemEditorScreen> {
         ? inferred.rhymeBook
         : base.rhymeBook.trim();
     final form = base.form.trim().isEmpty ? inferred.form : base.form.trim();
-    final note = base.note.trim().isEmpty ? inferred.note : base.note.trim();
+    final baseNote = base.note.trim();
+    final note = baseNote.isEmpty ||
+            (inferred.system == Poem.prosodySystemCi &&
+                !isStaleUnsupportedCiProsodyNote(inferred.note) &&
+                isStaleUnsupportedCiProsodyNote(baseNote))
+        ? inferred.note
+        : baseNote;
     return base.copyWith(
       supported: supported,
       enabled: enabled,

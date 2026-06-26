@@ -3,6 +3,8 @@ import 'package:flutter/material.dart';
 import '../data/app_database.dart';
 import '../models/poem.dart';
 import '../models/poem_collection.dart';
+import '../theme/app_typography.dart';
+import '../widgets/huiyun_visuals.dart';
 import 'poem_agent_chat_screen.dart';
 import 'poem_editor_screen.dart';
 
@@ -455,24 +457,27 @@ class _PoemListScreenState extends State<PoemListScreen> {
                       itemBuilder: (context, index) {
                         final poem = poems[index];
                         final poemId = poem.id;
-                        return _PoemCard(
-                          poem: poem,
-                          displayIndex: poemId == null
-                              ? index + 1
-                              : (_poemPositions[poemId] ?? index + 1),
-                          selectionMode: _isSelecting,
-                          selected: poemId != null &&
-                              _selectedPoemIds.contains(poemId),
-                          onTap: () {
-                            if (_isSelecting) {
-                              _togglePoemSelection(poem);
-                            } else {
-                              _openEditor(poem: poem);
-                            }
-                          },
-                          onLongPress: () => _selectPoem(poem),
-                          onMove: () => _movePoem(poem, index, poems.length),
-                          onDelete: () => _deletePoem(poem),
+                        return HuiyunPageEntrance(
+                          index: index,
+                          child: _PoemCard(
+                            poem: poem,
+                            displayIndex: poemId == null
+                                ? index + 1
+                                : (_poemPositions[poemId] ?? index + 1),
+                            selectionMode: _isSelecting,
+                            selected: poemId != null &&
+                                _selectedPoemIds.contains(poemId),
+                            onTap: () {
+                              if (_isSelecting) {
+                                _togglePoemSelection(poem);
+                              } else {
+                                _openEditor(poem: poem);
+                              }
+                            },
+                            onLongPress: () => _selectPoem(poem),
+                            onMove: () => _movePoem(poem, index, poems.length),
+                            onDelete: () => _deletePoem(poem),
+                          ),
                         );
                       },
                     ),
@@ -647,14 +652,12 @@ class _PoemCard extends StatelessWidget {
         .replaceAll('\r\n', '\n')
         .replaceAll('\r', '\n');
 
-    return Card(
-      child: InkWell(
-        borderRadius: BorderRadius.circular(8),
-        onTap: onTap,
-        onLongPress: onLongPress,
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(16, 14, 8, 14),
-          child: Row(
+    return HuiyunPaperCard(
+      onTap: onTap,
+      onLongPress: onLongPress,
+      selected: selected,
+      padding: const EdgeInsets.fromLTRB(16, 14, 8, 14),
+      child: Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               if (selectionMode) ...[
@@ -684,7 +687,10 @@ class _PoemCard extends StatelessWidget {
                       poem.title,
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
-                      style: theme.textTheme.titleMedium,
+                      style: theme.textTheme.titleMedium?.copyWith(
+                        fontFamily: kFeiHuaSongTiFontFamily,
+                        fontWeight: FontWeight.w700,
+                      ),
                     ),
                     const SizedBox(height: 4),
                     Text(
@@ -731,7 +737,11 @@ class _PoemCard extends StatelessWidget {
                       contentPreview,
                       maxLines: 2,
                       overflow: TextOverflow.ellipsis,
-                      style: theme.textTheme.bodyMedium,
+                      style: theme.textTheme.bodyMedium?.copyWith(
+                        fontFamily: kSongTiFontFamily,
+                        fontFamilyFallback: kSongTiFontFallback,
+                        fontWeight: FontWeight.w700,
+                      ),
                     ),
                   ],
                 ),
@@ -750,8 +760,6 @@ class _PoemCard extends StatelessWidget {
                 ),
             ],
           ),
-        ),
-      ),
     );
   }
 }
@@ -828,25 +836,10 @@ class _PoemMessageView extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    return Center(
-      child: Padding(
-        padding: const EdgeInsets.all(24),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(icon, size: 48, color: theme.colorScheme.primary),
-            const SizedBox(height: 16),
-            Text(title, style: theme.textTheme.titleMedium),
-            const SizedBox(height: 8),
-            Text(
-              message,
-              textAlign: TextAlign.center,
-              style: theme.textTheme.bodyMedium,
-            ),
-          ],
-        ),
-      ),
+    return HuiyunEmptyState(
+      icon: icon,
+      title: title,
+      message: message,
     );
   }
 }

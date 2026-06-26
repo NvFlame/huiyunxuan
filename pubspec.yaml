@@ -65,6 +65,7 @@ flutter:
 
   assets:
     - assets/data/tang_poems_300.json
+    - assets/branding/home_title.png
 
   # To add assets to your application, add an assets section, like this:
   # assets:
@@ -83,6 +84,13 @@ flutter:
   # list giving the asset and other descriptors for the font. For
   # example:
   # fonts:
+  fonts:
+    - family: FeiHuaSongTi
+      fonts:
+        - asset: FeiHuaSongTi/FeiHuaSongTi-2.ttf
+    - family: HuiyunSongTi
+      fonts:
+        - asset: simsun.ttc
   #   - family: Schyler
   #     fonts:
   #       - asset: fonts/Schyler-Regular.ttf

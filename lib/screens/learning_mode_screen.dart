@@ -9,7 +9,9 @@ import '../models/poem.dart';
 import '../models/poem_collection.dart';
 import '../services/prosody_ai_service.dart';
 import '../services/regulated_verse_checker.dart';
+import '../theme/app_typography.dart';
 import '../widgets/prosody_calibration_dialog.dart';
+import '../widgets/huiyun_visuals.dart';
 import '../widgets/prosody_panel.dart';
 import '../widgets/tone_marked_text.dart';
 import 'poem_agent_chat_screen.dart';
@@ -1391,6 +1393,8 @@ class _PoemLearningHeader extends StatelessWidget {
           title.isEmpty ? '未命名诗词' : title,
           style: titleStyle?.copyWith(
             color: const Color(0xFF4F3B12),
+            fontFamily: kFeiHuaSongTiFontFamily,
+            fontWeight: FontWeight.w700,
             height: 1.24,
           ),
         ),
@@ -1619,15 +1623,10 @@ class _PoemContentViewState extends State<_PoemContentView> {
     }
     var lineNumber = 0;
 
-    Widget content = DecoratedBox(
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: const Color(0xFFEEDC9A)),
-      ),
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(12, 14, 12, 14),
-        child: Column(
+    Widget content = HuiyunPaperCard(
+      margin: EdgeInsets.zero,
+      padding: const EdgeInsets.fromLTRB(12, 14, 12, 14),
+      child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             for (final rawLine in lines)
@@ -1686,6 +1685,9 @@ class _PoemContentViewState extends State<_PoemContentView> {
                                       theme.textTheme.titleMedium?.copyWith(
                                     height: 1.25,
                                     color: const Color(0xFF2F2510),
+                                    fontFamily: kSongTiFontFamily,
+                                    fontFamilyFallback: kSongTiFontFallback,
+                                    fontWeight: FontWeight.w700,
                                   ),
                                 )
                               : _SelectableLineText(
@@ -1693,6 +1695,9 @@ class _PoemContentViewState extends State<_PoemContentView> {
                                   style: theme.textTheme.titleMedium?.copyWith(
                                     height: 1.7,
                                     color: const Color(0xFF2F2510),
+                                    fontFamily: kSongTiFontFamily,
+                                    fontFamilyFallback: kSongTiFontFallback,
+                                    fontWeight: FontWeight.w700,
                                   ),
                                 ),
                         ),
@@ -1761,7 +1766,6 @@ class _PoemContentViewState extends State<_PoemContentView> {
                 ),
           ],
         ),
-      ),
     );
 
     if (widget.showToneMarks) {
@@ -1893,8 +1897,9 @@ class _LearningSection extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    return Card(
+    return HuiyunPaperCard(
       margin: const EdgeInsets.symmetric(vertical: 6),
+      padding: EdgeInsets.zero,
       child: Theme(
         data: theme.copyWith(dividerColor: Colors.transparent),
         child: ExpansionTile(
@@ -1930,9 +1935,10 @@ class _ControlledLearningSection extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Card(
+    return HuiyunPaperCard(
       key: sectionKey,
       margin: const EdgeInsets.symmetric(vertical: 6),
+      padding: EdgeInsets.zero,
       child: Column(
         children: [
           ListTile(
@@ -2029,8 +2035,9 @@ class _LearningNoteSectionState extends State<_LearningNoteSection> {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
 
-    return Card(
+    return HuiyunPaperCard(
       margin: const EdgeInsets.symmetric(vertical: 6),
+      padding: EdgeInsets.zero,
       child: Theme(
         data: theme.copyWith(dividerColor: Colors.transparent),
         child: ExpansionTile(
@@ -2312,6 +2319,13 @@ class _PoemSearchSheetState extends State<_PoemSearchSheet> {
                               poem.title,
                               maxLines: 2,
                               overflow: TextOverflow.ellipsis,
+                              style: Theme.of(context)
+                                  .textTheme
+                                  .titleMedium
+                                  ?.copyWith(
+                                    fontFamily: kFeiHuaSongTiFontFamily,
+                                    fontWeight: FontWeight.w700,
+                                  ),
                             ),
                             subtitle: Text(
                               [
@@ -2350,25 +2364,10 @@ class _LearningMessageView extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    return Center(
-      child: Padding(
-        padding: const EdgeInsets.all(24),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(icon, size: 48, color: theme.colorScheme.primary),
-            const SizedBox(height: 12),
-            Text(title, style: theme.textTheme.titleMedium),
-            const SizedBox(height: 8),
-            Text(
-              message,
-              textAlign: TextAlign.center,
-              style: theme.textTheme.bodyMedium,
-            ),
-          ],
-        ),
-      ),
+    return HuiyunEmptyState(
+      icon: icon,
+      title: title,
+      message: message,
     );
   }
 }

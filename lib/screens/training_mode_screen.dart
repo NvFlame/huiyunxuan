@@ -7,6 +7,8 @@ import 'package:flutter/services.dart';
 import '../data/app_database.dart';
 import '../models/poem.dart';
 import '../models/poem_collection.dart';
+import '../theme/app_typography.dart';
+import '../widgets/huiyun_visuals.dart';
 import '../widgets/prosody_panel.dart';
 import '../widgets/tone_marked_text.dart';
 import 'poem_agent_chat_screen.dart';
@@ -1165,11 +1167,10 @@ class _TrainingModeScreenState extends State<TrainingModeScreen> {
   Widget _buildEmptyCollectionCard() {
     final theme = Theme.of(context);
     final collectionName = _selectedCollection?.name ?? '当前诗词库';
-    return Card(
+    return HuiyunPaperCard(
       margin: EdgeInsets.zero,
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Row(
+      padding: const EdgeInsets.all(16),
+      child: Row(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Icon(
@@ -1195,7 +1196,6 @@ class _TrainingModeScreenState extends State<TrainingModeScreen> {
             ),
           ],
         ),
-      ),
     );
   }
 
@@ -1292,6 +1292,9 @@ class _TrainingModeScreenState extends State<TrainingModeScreen> {
                           ?.copyWith(
                             height: 1.25,
                             color: const Color(0xFF2F2510),
+                            fontFamily: kSongTiFontFamily,
+                            fontFamilyFallback: kSongTiFontFallback,
+                            fontWeight: FontWeight.w700,
                           ),
                     )
                   : SelectableText(
@@ -1299,6 +1302,9 @@ class _TrainingModeScreenState extends State<TrainingModeScreen> {
                       style: Theme.of(context).textTheme.titleMedium?.copyWith(
                             height: 1.75,
                             color: const Color(0xFF2F2510),
+                            fontFamily: kSongTiFontFamily,
+                            fontFamilyFallback: kSongTiFontFallback,
+                            fontWeight: FontWeight.w700,
                           ),
                     ),
             ),
@@ -1593,11 +1599,10 @@ class _TrainingProgressCard extends StatelessWidget {
       poem.author.trim(),
     ].where((item) => item.isNotEmpty).join(' · ');
 
-    return Card(
+    return HuiyunPaperCard(
       margin: EdgeInsets.zero,
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
+      padding: const EdgeInsets.all(16),
+      child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Row(
@@ -1619,7 +1624,10 @@ class _TrainingProgressCard extends StatelessWidget {
               poem.title.trim().isEmpty ? '未命名诗词' : poem.title.trim(),
               maxLines: 2,
               overflow: TextOverflow.ellipsis,
-              style: theme.textTheme.titleLarge,
+              style: theme.textTheme.titleLarge?.copyWith(
+                fontFamily: kFeiHuaSongTiFontFamily,
+                fontWeight: FontWeight.w700,
+              ),
             ),
             const SizedBox(height: 4),
             Text(
@@ -1652,7 +1660,6 @@ class _TrainingProgressCard extends StatelessWidget {
             ),
           ],
         ),
-      ),
     );
   }
 }
@@ -1672,15 +1679,25 @@ class _TrainingOptionSection extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
 
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(title, style: theme.textTheme.titleMedium),
-        const SizedBox(height: 8),
-        child,
-        const SizedBox(height: 6),
-        Text(description, style: theme.textTheme.bodySmall),
-      ],
+    return HuiyunPaperCard(
+      margin: EdgeInsets.zero,
+      padding: const EdgeInsets.fromLTRB(16, 14, 16, 16),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(title, style: theme.textTheme.titleMedium),
+          const SizedBox(height: 10),
+          child,
+          const SizedBox(height: 8),
+          Text(
+            description,
+            style: theme.textTheme.bodySmall?.copyWith(
+              color: HuiyunPalette.inkSoft,
+              height: 1.45,
+            ),
+          ),
+        ],
+      ),
     );
   }
 }
@@ -1716,7 +1733,12 @@ class _TrainingPoemHeader extends StatelessWidget {
               child: Text(
                 poem.title.trim().isEmpty ? '未命名诗词' : poem.title.trim(),
                 style: _titleStyle(theme.textTheme, poem.title.length)
-                    ?.copyWith(color: const Color(0xFF4F3B12), height: 1.24),
+                    ?.copyWith(
+                      color: const Color(0xFF4F3B12),
+                      fontFamily: kFeiHuaSongTiFontFamily,
+                      fontWeight: FontWeight.w700,
+                      height: 1.24,
+                    ),
               ),
             ),
             const SizedBox(width: 10),
@@ -2044,8 +2066,9 @@ class _TrainingContentSection extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    return Card(
+    return HuiyunPaperCard(
       margin: const EdgeInsets.symmetric(vertical: 6),
+      padding: EdgeInsets.zero,
       child: Theme(
         data: theme.copyWith(dividerColor: Colors.transparent),
         child: ExpansionTile(
@@ -2101,26 +2124,10 @@ class _TrainingMessageView extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-
-    return Center(
-      child: Padding(
-        padding: const EdgeInsets.all(28),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(icon, size: 48, color: theme.colorScheme.primary),
-            const SizedBox(height: 12),
-            Text(title, style: theme.textTheme.titleMedium),
-            const SizedBox(height: 8),
-            Text(
-              message,
-              textAlign: TextAlign.center,
-              style: theme.textTheme.bodyMedium,
-            ),
-          ],
-        ),
-      ),
+    return HuiyunEmptyState(
+      icon: icon,
+      title: title,
+      message: message,
     );
   }
 }
@@ -2202,6 +2209,13 @@ class _TrainingPoemSearchSheetState extends State<_TrainingPoemSearchSheet> {
                               poem.title,
                               maxLines: 2,
                               overflow: TextOverflow.ellipsis,
+                              style: Theme.of(context)
+                                  .textTheme
+                                  .titleMedium
+                                  ?.copyWith(
+                                    fontFamily: kFeiHuaSongTiFontFamily,
+                                    fontWeight: FontWeight.w700,
+                                  ),
                             ),
                             subtitle: Text(
                               [

@@ -158,6 +158,16 @@ ProsodyMetadata metadataFromPoem(Poem poem) {
   );
 }
 
+bool isStaleUnsupportedCiProsodyNote(String note) {
+  final text = note.trim();
+  if (text.isEmpty) {
+    return false;
+  }
+  return text.contains('本地词谱暂未接入') ||
+      text.contains('暂不支持该词牌的格律审查') ||
+      (text.contains('暂不支持《') && text.contains('格律审查'));
+}
+
 String prosodySystemLabel(String system) {
   switch (system) {
     case Poem.prosodySystemRegulatedVerse:

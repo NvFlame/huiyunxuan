@@ -15,6 +15,7 @@ const String ciTuneCatalogSource = '''
 一萼红
 一落索
 丁香结
+九张机
 七娘子
 万年欢
 万里春
@@ -202,7 +203,6 @@ const String ciTuneCatalogSource = '''
 安公子
 安平乐慢
 定西番
-定风波
 定风波慢
 宜男草
 宝鼎现
@@ -265,10 +265,8 @@ const String ciTuneCatalogSource = '''
 忆帝京
 忆旧游
 忆汉月
-忆江南
 忆王孙
 忆瑶姬
-忆秦娥
 忆闷令
 忆黄梅
 快活年近拍
@@ -434,7 +432,6 @@ const String ciTuneCatalogSource = '''
 氐州第一
 水仙子
 水晶帘
-水调歌头
 水龙吟
 永遇乐
 汉宫春
@@ -653,7 +650,6 @@ const String ciTuneCatalogSource = '''
 蕙兰芳引
 薄倖
 薄媚摘遍
-虞美人
 蜀溪春
 蝴蝶儿
 蝶恋花
@@ -665,7 +661,6 @@ const String ciTuneCatalogSource = '''
 西子妆
 西平乐
 西施
-西江月
 西江月慢
 西河
 西湖月
@@ -736,7 +731,6 @@ const String ciTuneCatalogSource = '''
 醉蓬莱
 醉高歌
 采明珠
-采桑子
 采桑子慢
 采绿吟
 采莲令
@@ -753,7 +747,6 @@ const String ciTuneCatalogSource = '''
 金菊对芙蓉
 金蕉叶
 金错刀
-钗头凤
 钿带长中调
 锁寒窗
 锁窗寒
@@ -826,6 +819,7 @@ const String ciTuneCatalogSource = '''
 鼓笛令
 齐天乐
 龙山会
+薄媚
 ''';
 
 final Set<String> ciTuneCatalogNames = _parseCiTuneCatalog(ciTuneCatalogSource);
