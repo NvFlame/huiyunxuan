@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 
+import 'data/app_database.dart';
 import 'screens/home_screen.dart';
+import 'services/time_cover_service.dart';
 import 'widgets/huiyun_visuals.dart';
 
 const appTitle = '绘云轩';
@@ -11,8 +13,51 @@ void main() {
   runApp(const HuiyunxuanApp());
 }
 
-class HuiyunxuanApp extends StatelessWidget {
+class HuiyunxuanApp extends StatefulWidget {
   const HuiyunxuanApp({super.key});
+
+  @override
+  State<HuiyunxuanApp> createState() => _HuiyunxuanAppState();
+}
+
+class _HuiyunxuanAppState extends State<HuiyunxuanApp>
+    with SingleTickerProviderStateMixin {
+  bool _splashDone = false;
+  late final AnimationController _splashFadeController;
+
+  @override
+  void initState() {
+    super.initState();
+    _splashFadeController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 500),
+      value: 1.0,
+    );
+    _startSplashSequence();
+  }
+
+  @override
+  void dispose() {
+    _splashFadeController.dispose();
+    super.dispose();
+  }
+
+  Future<void> _startSplashSequence() async {
+    // Start DB initialization early so it runs during the splash.
+    // Keep the Future so we do not trigger a second openDatabase call.
+    final dbInit = AppDatabase.instance.database;
+
+    await Future.delayed(const Duration(seconds: 2));
+
+    // Ensure the database is ready before HomeScreen mounts.
+    await dbInit;
+
+    if (!mounted) return;
+    await _splashFadeController.reverse();
+
+    if (!mounted) return;
+    setState(() => _splashDone = true);
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -262,7 +307,12 @@ class HuiyunxuanApp extends StatelessWidget {
           thickness: 0.7,
         ),
       ),
-      home: const HomeScreen(),
+      home: _splashDone
+          ? const HomeScreen()
+          : FadeTransition(
+              opacity: _splashFadeController,
+              child: const _TimeCoverSplash(),
+            ),
     );
   }
 }
@@ -413,6 +463,57 @@ class _HuiyunPageTransitionsBuilder extends PageTransitionsBuilder {
         opacity: curved,
         child: child,
       ),
+    );
+  }
+}
+
+class _TimeCoverSplash extends StatefulWidget {
+  const _TimeCoverSplash();
+
+  @override
+  State<_TimeCoverSplash> createState() => _TimeCoverSplashState();
+}
+
+class _TimeCoverSplashState extends State<_TimeCoverSplash> {
+  static const _coverService = TimeCoverService();
+
+  String? _assetPath;
+
+  @override
+  void initState() {
+    super.initState();
+    _resolveCover();
+  }
+
+  Future<void> _resolveCover() async {
+    final path = await _coverService.resolveAsset(DateTime.now());
+    if (mounted) {
+      setState(() => _assetPath = path);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return DecoratedBox(
+      decoration: const BoxDecoration(
+        gradient: LinearGradient(
+          begin: Alignment.topCenter,
+          end: Alignment.bottomCenter,
+          colors: [
+            Color(0xFFFFF7D7),
+            Color(0xFFFFFAEA),
+            Color(0xFFFFF5DF),
+          ],
+        ),
+      ),
+      child: _assetPath == null
+          ? const SizedBox.expand()
+          : Image.asset(
+              _assetPath!,
+              fit: BoxFit.fill,
+              width: double.infinity,
+              height: double.infinity,
+            ),
     );
   }
 }

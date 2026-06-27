@@ -2009,10 +2009,13 @@ class _AchievementBadge extends StatelessWidget {
     return SizedBox(
       width: size,
       height: size * 0.78,
-      child: Image.asset(
-        asset,
-        fit: BoxFit.contain,
-        filterQuality: FilterQuality.medium,
+      child: Opacity(
+        opacity: 0.5,
+        child: Image.asset(
+          asset,
+          fit: BoxFit.contain,
+          filterQuality: FilterQuality.medium,
+        ),
       ),
     );
   }
