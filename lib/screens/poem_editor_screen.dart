@@ -1,4 +1,4 @@
-import 'package:flutter/material.dart';
+﻿import 'package:flutter/material.dart';
 
 import '../data/app_database.dart';
 import '../models/poem.dart';
@@ -309,7 +309,7 @@ class _PoemEditorScreenState extends State<PoemEditorScreen> {
               TextFormField(
                 controller: _prefaceController,
                 decoration: const InputDecoration(
-                  labelText: '序 / 小序',
+                  labelText: '序',
                   hintText: '例如：丙辰中秋，欢饮达旦，大醉，作此篇，兼怀子由。',
                   alignLabelWithHint: true,
                 ),

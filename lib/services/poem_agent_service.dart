@@ -1,4 +1,4 @@
-import 'dart:convert';
+﻿import 'dart:convert';
 
 import '../models/api_config.dart';
 import '../models/poem.dart';
@@ -420,7 +420,7 @@ $searchBlock
 6. 不要因为本 query 的资料没有包含其它诗词，就否定其它诗词；你只评价本 query。
 
 add_poem JSON 形如：
-{"type":"add_poem","message":"简短说明","collection_id":${targetCollection.id},"poem":{"title":"标题","author":"作者","dynasty":"朝代","preface":"序或小序，没有则留空","content":"诗词全文，一行一句","remark":"","translation":"译文","annotation":"注释","learning_note":"","appreciation":"赏析"}}
+{"type":"add_poem","message":"简短说明","collection_id":${targetCollection.id},"poem":{"title":"标题","author":"作者","dynasty":"朝代","preface":"序，没有则留空","content":"诗词全文，一行一句","remark":"","translation":"译文","annotation":"注释","learning_note":"","appreciation":"赏析"}}
 
 内容规范：
 - content 必须保留逗号、句号、问号、叹号、分号、顿号、冒号等原文标点。
@@ -648,10 +648,10 @@ JSON 格式只能是以下八类之一：
 {"type":"search_batch","message":"我需要分别核验这些诗词","collection_id":1,"queries":["作者A 标题A 首句A 全文 译文 注释 赏析","作者B 标题B 首句B 全文 译文 注释 赏析"]}
 
 4. 可以添加诗词：
-{"type":"add_poem","message":"简短说明","collection_id":1,"poem":{"title":"标题","author":"作者","dynasty":"朝代","preface":"序或小序，没有则留空","content":"诗词全文，一行一句","remark":"","translation":"译文","annotation":"注释","learning_note":"","appreciation":"赏析"}}
+{"type":"add_poem","message":"简短说明","collection_id":1,"poem":{"title":"标题","author":"作者","dynasty":"朝代","preface":"序，没有则留空","content":"诗词全文，一行一句","remark":"","translation":"译文","annotation":"注释","learning_note":"","appreciation":"赏析"}}
 
 5. 可以一次添加多首诗词：
-{"type":"add_poems","message":"简短说明","collection_id":1,"poems":[{"title":"标题","author":"作者","dynasty":"朝代","preface":"序或小序，没有则留空","content":"诗词全文，一行一句","remark":"","translation":"译文","annotation":"注释","learning_note":"","appreciation":"赏析"},{"title":"标题","author":"作者","dynasty":"朝代","preface":"序或小序，没有则留空","content":"诗词全文，一行一句","remark":"","translation":"译文","annotation":"注释","learning_note":"","appreciation":"赏析"}]}
+{"type":"add_poems","message":"简短说明","collection_id":1,"poems":[{"title":"标题","author":"作者","dynasty":"朝代","preface":"序，没有则留空","content":"诗词全文，一行一句","remark":"","translation":"译文","annotation":"注释","learning_note":"","appreciation":"赏析"},{"title":"标题","author":"作者","dynasty":"朝代","preface":"序，没有则留空","content":"诗词全文，一行一句","remark":"","translation":"译文","annotation":"注释","learning_note":"","appreciation":"赏析"}]}
 
 6. 可以更新已有诗词元素：
 {"type":"update_poem","message":"简短说明","poem_id":12,"updates":{"translation":"新的译文","annotation":"新的注释","learning_note":"新的学习笔记","appreciation":"新的赏析内容"}}
@@ -707,7 +707,7 @@ JSON 格式只能是以下八类之一：
   - content 必须保留权威来源或通行整理本中的现代标点，包括逗号、句号、问号、叹号、分号、冒号、顿号等；换行时不得删除标点。
   - 五言、七言诗句如果原整理本为“天上白玉京，十二楼五城。”，应写成“天上白玉京，”换行“十二楼五城。”，不能写成“天上白玉京”换行“十二楼五城”。
   - 如果搜索结果只有无标点古籍文本，应优先继续寻找带标点的权威整理本；不能可靠补出标点时，不要添加入库，应 ask 用户确认是否接受无标点版本。
-  - preface 只填写题前序、词前小序或作者原有题注，例如“丙辰中秋，欢饮达旦……兼怀子由。”；不要把序混入 content，也不要把普通备注写入 preface。
+  - preface 只填写题前序或作者原有题注，例如“丙辰中秋，欢饮达旦……兼怀子由。”；不要把序混入 content，也不要把普通备注写入 preface。
   - 长篇歌行、古体诗仍按诗句单位换行；如权威通行版本有明显分段，可用空行保留分段。
   - translation 尽量与 content 行数和顺序对应，一句译文一行；无法逐句对应时，按自然段保持可读。
   - annotation 使用“[行号] 注释内容”的格式，一条注释一行；这里的行号不是注释序号。正文行号从 content 中第 1 个非空原文行开始计算，空行不计入行号。
@@ -1191,7 +1191,7 @@ class PoemAgentUpdates {
     'title': '标题',
     'author': '作者',
     'dynasty': '朝代',
-    'preface': '序/小序',
+    'preface': '序',
     'content': '内容',
     'remark': '备注',
     'translation': '译文',
@@ -1489,3 +1489,4 @@ String _emptyAsNone(String value) {
   final trimmed = value.trim();
   return trimmed.isEmpty ? '（空）' : trimmed;
 }
+

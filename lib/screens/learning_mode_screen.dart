@@ -1,4 +1,4 @@
-import 'dart:async';
+﻿import 'dart:async';
 import 'dart:math' as math;
 
 import 'package:flutter/gestures.dart';
@@ -1610,7 +1610,7 @@ class _PoemLearningHeader extends StatelessWidget {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text('序 / 小序', style: theme.textTheme.labelLarge),
+                  Text('序', style: theme.textTheme.labelLarge),
                   const SizedBox(height: 6),
                   SelectableText(
                     poem.preface.trim(),
