@@ -815,7 +815,7 @@ return SafeArea(
                     ),
                     const SizedBox(height: 6),
                     Text(
-                      ' \u00b7 ',
+                      '${poem.dynasty}·${poem.author} ${poem.title}',
                       maxLines: 2,
                       overflow: TextOverflow.ellipsis,
                       style: theme.textTheme.bodySmall?.copyWith(
