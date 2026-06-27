@@ -3,8 +3,8 @@ import 'dart:math' as math;
 import 'package:flutter/material.dart';
 
 import '../data/app_database.dart';
+import '../models/poem.dart';
 import '../theme/app_typography.dart';
-import '../widgets/huiyun_visuals.dart';
 import 'api_settings_screen.dart';
 import 'collection_list_screen.dart';
 import 'learning_mode_screen.dart';
@@ -19,11 +19,13 @@ class HomeScreen extends StatefulWidget {
 
 class _HomeScreenState extends State<HomeScreen> {
   int? _jinshiPoints;
+  Poem? _homePoem;
 
   @override
   void initState() {
     super.initState();
     _loadJinshiPoints();
+    _loadHomePoem();
   }
 
   Future<void> _loadJinshiPoints() async {
@@ -33,6 +35,16 @@ class _HomeScreenState extends State<HomeScreen> {
     }
     setState(() {
       _jinshiPoints = points;
+    });
+  }
+
+  Future<void> _loadHomePoem() async {
+    final poem = await AppDatabase.instance.getRandomHomeDisplayPoem();
+    if (!mounted) {
+      return;
+    }
+    setState(() {
+      _homePoem = poem;
     });
   }
 
@@ -82,57 +94,103 @@ class _HomeScreenState extends State<HomeScreen> {
             CustomPaint(
               painter: const _HomeBackgroundPainter(),
               child: SafeArea(
-            child: Column(
-              children: [
-                const _HomeTitleMark(),
-                Expanded(
-                  child: LayoutBuilder(
-                    builder: (context, constraints) {
-                      final topPadding =
-                          constraints.maxHeight < 560 ? 10.0 : 24.0;
-                      return Padding(
-                        padding: EdgeInsets.fromLTRB(16, topPadding, 16, 12),
-                        child: Align(
-                          alignment: Alignment.topCenter,
-                          child: TweenAnimationBuilder<double>(
-                            tween: Tween(begin: 0, end: 1),
-                            duration: const Duration(milliseconds: 680),
-                            curve: Curves.easeOutCubic,
-                            builder: (context, value, child) {
-                              return Opacity(
-                                opacity: value,
-                                child: Transform.translate(
-                                  offset: Offset(0, (1 - value) * 12),
-                                  child: child,
+                child: Column(
+                  children: [
+                    const _HomeTitleMark(),
+                    Expanded(
+                      child: TweenAnimationBuilder<double>(
+                        tween: Tween(begin: 0, end: 1),
+                        duration: const Duration(milliseconds: 680),
+                        curve: Curves.easeOutCubic,
+                        builder: (context, value, child) {
+                          return Opacity(
+                            opacity: value,
+                            child: Transform.translate(
+                              offset: Offset(0, (1 - value) * 12),
+                              child: child,
+                            ),
+                          );
+                        },
+                        child: _HomeMainStage(
+                          poem: _homePoem,
+                          points: _jinshiPoints,
+                          onJinshiTap: _openJinshiHistory,
+                        ),
+                      ),
+                    ),
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(20, 4, 20, 0),
+                      child: Column(
+                        children: [
+                          Text(
+                            '绘云诗人作品\nBy Cloudweaver Poet',
+                            textAlign: TextAlign.center,
+                            style: theme.textTheme.bodySmall?.copyWith(
+                              color: const Color(0xFF8A7A4A),
+                              height: 1.45,
+                            ),
+                          ),
+                          const SizedBox(height: 10),
+                          Container(
+                            height: 1,
+                            decoration: BoxDecoration(
+                              gradient: LinearGradient(
+                                colors: [
+                                  const Color(0xFFC9A85D).withOpacity(0),
+                                  const Color(0xFFC9A85D).withOpacity(0.55),
+                                  const Color(0xFFC9A85D).withOpacity(0),
+                                ],
+                              ),
+                            ),
+                          ),
+                          const SizedBox(height: 7),
+                          _HomeIconDock(
+                            onLearningTap: () {
+                              Navigator.push<void>(
+                                context,
+                                MaterialPageRoute(
+                                  builder: (context) =>
+                                      const LearningModeScreen(),
                                 ),
                               );
                             },
-                            child: _HomeCompass(
-                              points: _jinshiPoints,
-                              onJinshiTap: _openJinshiHistory,
-                              onTrainingReturn: _loadJinshiPoints,
-                              onLibraryReturn: _loadJinshiPoints,
-                              onSettingsReturn: _loadJinshiPoints,
-                            ),
+                            onTrainingTap: () async {
+                              await Navigator.push<void>(
+                                context,
+                                MaterialPageRoute(
+                                  builder: (context) =>
+                                      const TrainingModeScreen(),
+                                ),
+                              );
+                              _loadJinshiPoints();
+                            },
+                            onLibraryTap: () async {
+                              await Navigator.push<void>(
+                                context,
+                                MaterialPageRoute(
+                                  builder: (context) =>
+                                      const CollectionListScreen(),
+                                ),
+                              );
+                              _loadJinshiPoints();
+                            },
+                            onSettingsTap: () async {
+                              await Navigator.push<void>(
+                                context,
+                                MaterialPageRoute(
+                                  builder: (context) =>
+                                      const ApiSettingsScreen(),
+                                ),
+                              );
+                              _loadJinshiPoints();
+                            },
                           ),
-                        ),
-                      );
-                    },
-                  ),
-                ),
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(16, 4, 16, 10),
-                  child: Text(
-                    '绘云诗人作品\nBy Cloudweaver Poet',
-                    textAlign: TextAlign.center,
-                    style: theme.textTheme.bodySmall?.copyWith(
-                      color: const Color(0xFF8A7A4A),
-                      height: 1.45,
+                          const SizedBox(height: 3),
+                        ],
+                      ),
                     ),
-                  ),
+                  ],
                 ),
-              ],
-            ),
               ),
             ),
           ],
@@ -196,39 +254,6 @@ class _HomeTitleMistPainter extends CustomPainter {
       ),
       glow,
     );
-
-    final brush = Paint()
-      ..color = const Color(0xFFCDB56D).withOpacity(0.14)
-      ..strokeWidth = 0.9
-      ..strokeCap = StrokeCap.round;
-    canvas.drawLine(
-      Offset(size.width * 0.22, size.height * 0.76),
-      Offset(size.width * 0.42, size.height * 0.7),
-      brush,
-    );
-    canvas.drawLine(
-      Offset(size.width * 0.58, size.height * 0.7),
-      Offset(size.width * 0.78, size.height * 0.76),
-      brush,
-    );
-
-    HuiyunCloudArt.drawRibbonCloud(
-      canvas,
-      center: Offset(size.width * 0.24, size.height * 0.62),
-      width: math.min(size.width * 0.28, 128),
-      color: const Color(0xFFC7A65D),
-      opacity: 0.24,
-      strokeWidth: 1.0,
-    );
-    HuiyunCloudArt.drawRibbonCloud(
-      canvas,
-      center: Offset(size.width * 0.76, size.height * 0.63),
-      width: math.min(size.width * 0.28, 128),
-      color: const Color(0xFFC7A65D),
-      opacity: 0.20,
-      strokeWidth: 1.0,
-      mirror: true,
-    );
   }
 
   @override
@@ -288,32 +313,6 @@ class _HomeBackgroundPainter extends CustomPainter {
       rightMist,
     );
 
-    HuiyunCloudArt.drawCloudWash(
-      canvas,
-      center: Offset(size.width * 0.72, size.height * 0.30),
-      width: size.width * 0.42,
-      color: const Color(0xFFD5B66C),
-      opacity: 0.05,
-      mirror: true,
-    );
-    HuiyunCloudArt.drawRibbonCloud(
-      canvas,
-      center: Offset(size.width * 0.76, size.height * 0.31),
-      width: size.width * 0.34,
-      color: const Color(0xFFC7A65D),
-      opacity: 0.12,
-      strokeWidth: 1.1,
-      mirror: true,
-    );
-    HuiyunCloudArt.drawRibbonCloud(
-      canvas,
-      center: Offset(size.width * 0.24, size.height * 0.46),
-      width: size.width * 0.32,
-      color: const Color(0xFF8E9278),
-      opacity: 0.08,
-      strokeWidth: 1.0,
-    );
-
     final warmInk = Paint()
       ..shader = RadialGradient(
         colors: [
@@ -341,30 +340,6 @@ class _HomeBackgroundPainter extends CustomPainter {
       moonPaint,
     );
 
-    final mountainPaint = Paint()
-      ..color = const Color(0xFF8E9278).withOpacity(0.09)
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = 1.2;
-    final mountainPath = Path()
-      ..moveTo(-20, size.height * 0.58)
-      ..cubicTo(
-        size.width * 0.16,
-        size.height * 0.48,
-        size.width * 0.28,
-        size.height * 0.66,
-        size.width * 0.46,
-        size.height * 0.55,
-      )
-      ..cubicTo(
-        size.width * 0.62,
-        size.height * 0.45,
-        size.width * 0.76,
-        size.height * 0.64,
-        size.width + 20,
-        size.height * 0.5,
-      );
-    canvas.drawPath(mountainPath, mountainPaint);
-
     final sealPaint = Paint()
       ..color = const Color(0xFF9A5B3D).withOpacity(0.035)
       ..style = PaintingStyle.stroke
@@ -384,120 +359,66 @@ class _HomeBackgroundPainter extends CustomPainter {
   bool shouldRepaint(covariant _HomeBackgroundPainter oldDelegate) => false;
 }
 
-class _HomeCompass extends StatelessWidget {
-  const _HomeCompass({
+class _HomeMainStage extends StatelessWidget {
+  const _HomeMainStage({
+    required this.poem,
     required this.points,
     required this.onJinshiTap,
-    required this.onTrainingReturn,
-    required this.onLibraryReturn,
-    required this.onSettingsReturn,
   });
 
+  final Poem? poem;
   final int? points;
   final VoidCallback onJinshiTap;
-  final VoidCallback onTrainingReturn;
-  final VoidCallback onLibraryReturn;
-  final VoidCallback onSettingsReturn;
-
-  Future<void> _open(
-    BuildContext context,
-    Widget destination, {
-    VoidCallback? onReturn,
-  }) async {
-    await Navigator.push<void>(
-      context,
-      MaterialPageRoute(builder: (context) => destination),
-    );
-    onReturn?.call();
-  }
 
   @override
   Widget build(BuildContext context) {
     return LayoutBuilder(
       builder: (context, constraints) {
-        final boardWidth = math.min(constraints.maxWidth, 520.0);
-        final gap = boardWidth < 360 ? 8.0 : 10.0;
-        final cardWidth = (boardWidth - gap) / 2;
-        final cardHeight = (boardWidth * 0.38).clamp(134.0, 188.0).toDouble();
-        final boardHeight = cardHeight * 2 + gap;
-        final diamondSize = (boardWidth * 0.35).clamp(118.0, 164.0).toDouble();
+        final stageWidth = math.min(constraints.maxWidth - 32, 520.0);
+        final stageHeight = constraints.maxHeight;
+        final compact = stageHeight < 560;
+        final diamondSize = compact ? 94.0 : 108.0;
+        final poemTop = compact ? 144.0 : 184.0;
+        final poemBottom = compact ? 14.0 : 24.0;
+        final titleWidth = compact ? 58.0 : 68.0;
+        final poemGap = compact ? 16.0 : 22.0;
+        final poemLeft = compact ? 32.0 : 42.0;
+        final poemFrameWidth = stageWidth - titleWidth - poemGap - 18;
 
-        return SizedBox(
-          width: boardWidth,
-          height: boardHeight,
-          child: CustomPaint(
-            painter: _CompassFramePainter(
-              gap: gap,
-              diamondSize: diamondSize,
-            ),
+        return Center(
+          child: SizedBox(
+            width: stageWidth,
+            height: stageHeight,
             child: Stack(
               clipBehavior: Clip.none,
-              alignment: Alignment.center,
               children: [
                 Positioned(
-                  left: 0,
-                  top: 0,
-                  width: cardWidth,
-                  height: cardHeight,
-                  child: _HomeCompassTile(
-                    title: '学文',
-                    icon: Icons.menu_book_outlined,
-                    accentColor: Color(0xFF8E9278),
-                    onTap: () => _open(context, const LearningModeScreen()),
+                  left: 18,
+                  top: compact ? 8 : 18,
+                  child: _JinshiDiamond(
+                    size: diamondSize,
+                    points: points,
+                    onTap: onJinshiTap,
                   ),
                 ),
                 Positioned(
-                  right: 0,
-                  top: 0,
-                  width: cardWidth,
-                  height: cardHeight,
-                  child: _HomeCompassTile(
-                    title: '展才',
-                    icon: Icons.edit_note_outlined,
-                    accentColor: Color(0xFFC39A32),
-                    onTap: () => _open(
-                      context,
-                      const TrainingModeScreen(),
-                      onReturn: onTrainingReturn,
-                    ),
-                  ),
+                  left: poemLeft,
+                  top: poemTop,
+                  bottom: poemBottom,
+                  width: poemFrameWidth,
+                  child: _HomePoemPanel(poem: poem),
                 ),
                 Positioned(
-                  left: 0,
-                  bottom: 0,
-                  width: cardWidth,
-                  height: cardHeight,
-                  child: _HomeCompassTile(
-                    title: '书架',
-                    icon: Icons.folder_outlined,
-                    accentColor: Color(0xFF9A7B48),
-                    onTap: () => _open(
-                      context,
-                      const CollectionListScreen(),
-                      onReturn: onLibraryReturn,
-                    ),
-                  ),
+                  left: compact ? 18 : 24,
+                  bottom: poemBottom + (compact ? 48 : 74),
+                  child: _HomePoemAuthor(author: poem?.author ?? ''),
                 ),
                 Positioned(
-                  right: 0,
-                  bottom: 0,
-                  width: cardWidth,
-                  height: cardHeight,
-                  child: _HomeCompassTile(
-                    title: '设置',
-                    icon: Icons.settings_outlined,
-                    accentColor: Color(0xFF8E8872),
-                    onTap: () => _open(
-                      context,
-                      const ApiSettingsScreen(),
-                      onReturn: onSettingsReturn,
-                    ),
-                  ),
-                ),
-                _JinshiDiamond(
-                  size: diamondSize,
-                  points: points,
-                  onTap: onJinshiTap,
+                  left: poemFrameWidth + poemGap,
+                  top: compact ? 58 : 86,
+                  bottom: poemBottom + 32,
+                  width: titleWidth,
+                  child: _HomePoemTitle(title: poem?.title ?? ''),
                 ),
               ],
             ),
@@ -508,236 +429,310 @@ class _HomeCompass extends StatelessWidget {
   }
 }
 
-class _CompassFramePainter extends CustomPainter {
-  const _CompassFramePainter({
-    required this.gap,
-    required this.diamondSize,
-  });
+class _HomePoemPanel extends StatelessWidget {
+  const _HomePoemPanel({required this.poem});
 
-  final double gap;
-  final double diamondSize;
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    final hairline = Paint()
-      ..color = const Color(0xFFD6BF77).withOpacity(0.5)
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = 0.8;
-    final accent = Paint()
-      ..color = const Color(0xFF8A6500).withOpacity(0.16)
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = 1.1;
-    final center = Offset(size.width / 2, size.height / 2);
-    final halfGap = gap / 2;
-    final diamondReserve = diamondSize * 0.45;
-
-    canvas.drawRRect(
-      RRect.fromRectAndRadius(
-        Rect.fromLTWH(-4, -4, size.width + 8, size.height + 8),
-        const Radius.circular(12),
-      ),
-      hairline,
-    );
-    canvas.drawLine(
-      Offset(center.dx, 0),
-      Offset(center.dx, center.dy - diamondReserve),
-      hairline,
-    );
-    canvas.drawLine(
-      Offset(center.dx, center.dy + diamondReserve),
-      Offset(center.dx, size.height),
-      hairline,
-    );
-    canvas.drawLine(
-      Offset(0, center.dy),
-      Offset(center.dx - diamondReserve, center.dy),
-      hairline,
-    );
-    canvas.drawLine(
-      Offset(center.dx + diamondReserve, center.dy),
-      Offset(size.width, center.dy),
-      hairline,
-    );
-
-    const corner = 28.0;
-    canvas.drawLine(const Offset(0, 0), const Offset(corner, 0), accent);
-    canvas.drawLine(const Offset(0, 0), const Offset(0, corner), accent);
-    canvas.drawLine(
-      Offset(size.width, 0),
-      Offset(size.width - corner, 0),
-      accent,
-    );
-    canvas.drawLine(
-      Offset(size.width, 0),
-      Offset(size.width, corner),
-      accent,
-    );
-    canvas.drawLine(
-      Offset(0, size.height),
-      Offset(corner, size.height),
-      accent,
-    );
-    canvas.drawLine(
-      Offset(0, size.height),
-      Offset(0, size.height - corner),
-      accent,
-    );
-    canvas.drawLine(
-      Offset(size.width, size.height),
-      Offset(size.width - corner, size.height),
-      accent,
-    );
-    canvas.drawLine(
-      Offset(size.width, size.height),
-      Offset(size.width, size.height - corner),
-      accent,
-    );
-
-    final nodePaint = Paint()
-      ..color = const Color(0xFFD6BF77).withOpacity(0.28)
-      ..style = PaintingStyle.fill;
-    canvas.drawCircle(Offset(center.dx - halfGap, center.dy), 2.2, nodePaint);
-    canvas.drawCircle(Offset(center.dx + halfGap, center.dy), 2.2, nodePaint);
-    canvas.drawCircle(Offset(center.dx, center.dy - halfGap), 2.2, nodePaint);
-    canvas.drawCircle(Offset(center.dx, center.dy + halfGap), 2.2, nodePaint);
-  }
-
-  @override
-  bool shouldRepaint(covariant _CompassFramePainter oldDelegate) {
-    return oldDelegate.gap != gap || oldDelegate.diamondSize != diamondSize;
-  }
-}
-
-class _HomeCompassTile extends StatelessWidget {
-  const _HomeCompassTile({
-    required this.title,
-    required this.icon,
-    required this.accentColor,
-    required this.onTap,
-  });
-
-  final String title;
-  final IconData icon;
-  final Color accentColor;
-  final VoidCallback onTap;
+  final Poem? poem;
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final borderColor = Color.lerp(
-      const Color(0xFFE6D08A),
-      accentColor,
-      0.16,
-    )!;
-    final endColor = Color.lerp(
-      const Color(0xFFFFF5D8),
-      accentColor,
-      0.055,
-    )!;
+    final lines = poem == null
+        ? const <String>[]
+        : _homeDisplayLines(poem!.content);
+    final displayLines = lines.length == 4 ? lines : const <String>[];
 
-    return DecoratedBox(
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(8),
-        boxShadow: [
-          BoxShadow(
-            color: const Color(0xFF6D5318).withOpacity(0.06),
-            blurRadius: 16,
-            offset: const Offset(0, 8),
-          ),
-        ],
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(26, 24, 26, 24),
+      child: displayLines.isEmpty
+          ? Center(
+              child: Text(
+                '诗文',
+                style: Theme.of(context).textTheme.headlineSmall?.copyWith(
+                      color: const Color(0xFF4F3B12).withOpacity(0.36),
+                      fontFamily: kSanjiXingKaiFontFamily,
+                      fontWeight: FontWeight.w500,
+                    ),
+              ),
+            )
+          : _VerticalPoemText(lines: displayLines),
+    );
+  }
+}
+
+class _VerticalPoemText extends StatelessWidget {
+  const _VerticalPoemText({required this.lines});
+
+  final List<String> lines;
+
+  @override
+  Widget build(BuildContext context) {
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final lineLength = lines.first.runes.length;
+        final fontSize = lineLength == 7 ? 29.0 : 34.0;
+        return Row(
+          mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          textDirection: TextDirection.rtl,
+          children: [
+            for (final line in lines)
+              _VerticalTextColumn(
+                text: line,
+                fontSize: fontSize,
+                color: const Color(0xFF4F3B12).withOpacity(0.70),
+              ),
+          ],
+        );
+      },
+    );
+  }
+}
+
+class _HomePoemTitle extends StatelessWidget {
+  const _HomePoemTitle({required this.title});
+
+  final String title;
+
+  @override
+  Widget build(BuildContext context) {
+    final cleanedTitle = _stripDisplayPunctuation(title);
+    return Align(
+      alignment: Alignment.topCenter,
+      child: _VerticalTextColumn(
+        text: cleanedTitle.isEmpty ? '诗题' : cleanedTitle,
+        fontSize: 28,
+        color: const Color(0xFF4F3B12).withOpacity(0.70),
+        allowOverflow: true,
       ),
-      child: Material(
-        color: Colors.transparent,
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(8),
-          side: BorderSide(color: borderColor, width: 1.1),
+    );
+  }
+}
+
+class _HomePoemAuthor extends StatelessWidget {
+  const _HomePoemAuthor({required this.author});
+
+  final String author;
+
+  @override
+  Widget build(BuildContext context) {
+    final cleanedAuthor = _stripDisplayPunctuation(author);
+    if (cleanedAuthor.isEmpty) {
+      return const SizedBox.shrink();
+    }
+    return _VerticalTextColumn(
+      text: cleanedAuthor,
+      fontSize: 28,
+      color: const Color(0xFF4F3B12).withOpacity(0.70),
+    );
+  }
+}
+
+class _VerticalTextColumn extends StatelessWidget {
+  const _VerticalTextColumn({
+    required this.text,
+    required this.fontSize,
+    required this.color,
+    this.allowOverflow = false,
+  });
+
+  final String text;
+  final double fontSize;
+  final Color color;
+  final bool allowOverflow;
+
+  @override
+  Widget build(BuildContext context) {
+    final children = [
+      for (final rune in text.runes)
+        Text(
+          String.fromCharCode(rune),
+          softWrap: false,
+          style: TextStyle(
+            color: color,
+            fontFamily: kSanjiXingKaiFontFamily,
+            fontWeight: FontWeight.w500,
+            fontSize: fontSize,
+            height: 1.08,
+          ),
         ),
-        clipBehavior: Clip.antiAlias,
-        child: Ink(
-          decoration: BoxDecoration(
-            gradient: LinearGradient(
-              begin: Alignment.topLeft,
-              end: Alignment.bottomRight,
-              colors: [
-                const Color(0xFFFFFDF4),
-                endColor,
-              ],
+    ];
+    if (allowOverflow) {
+      return OverflowBox(
+        alignment: Alignment.topCenter,
+        minHeight: 0,
+        maxHeight: double.infinity,
+        child: Column(mainAxisSize: MainAxisSize.min, children: children),
+      );
+    }
+    return Column(mainAxisSize: MainAxisSize.min, children: children);
+  }
+}
+
+class _HomeIconDock extends StatelessWidget {
+  const _HomeIconDock({
+    required this.onLearningTap,
+    required this.onTrainingTap,
+    required this.onLibraryTap,
+    required this.onSettingsTap,
+  });
+
+  final VoidCallback onLearningTap;
+  final VoidCallback onTrainingTap;
+  final VoidCallback onLibraryTap;
+  final VoidCallback onSettingsTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      mainAxisAlignment: MainAxisAlignment.spaceAround,
+      children: [
+        _HomeDockItem(
+          label: '学文',
+          assetPath: 'assets/home_icons/learning_scroll.png',
+          onTap: onLearningTap,
+        ),
+        _HomeDockItem(
+          label: '展才',
+          assetPath: 'assets/home_icons/training_brush.png',
+          assetSize: 44,
+          onTap: onTrainingTap,
+        ),
+        _HomeDockItem(
+          label: '书架',
+          icon: Icons.folder_outlined,
+          onTap: onLibraryTap,
+        ),
+        _HomeDockItem(
+          label: '设置',
+          icon: Icons.settings_outlined,
+          onTap: onSettingsTap,
+        ),
+      ],
+    );
+  }
+}
+
+class _HomeDockItem extends StatefulWidget {
+  const _HomeDockItem({
+    required this.label,
+    required this.onTap,
+    this.icon,
+    this.assetPath,
+    this.assetSize = 38,
+  });
+
+  final String label;
+  final VoidCallback onTap;
+  final IconData? icon;
+  final String? assetPath;
+  final double assetSize;
+
+  @override
+  State<_HomeDockItem> createState() => _HomeDockItemState();
+}
+
+class _HomeDockItemState extends State<_HomeDockItem> {
+  bool _showLabel = false;
+
+  void _setLabelVisible(bool visible) {
+    if (_showLabel == visible) {
+      return;
+    }
+    setState(() {
+      _showLabel = visible;
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onTap: widget.onTap,
+      onLongPressStart: (_) => _setLabelVisible(true),
+      onLongPressEnd: (_) => _setLabelVisible(false),
+      onLongPressCancel: () => _setLabelVisible(false),
+      child: SizedBox(
+        width: 68,
+        height: 64,
+        child: Stack(
+          alignment: Alignment.center,
+          clipBehavior: Clip.none,
+          children: [
+            AnimatedOpacity(
+              opacity: _showLabel ? 0.5 : 0,
+              duration: const Duration(milliseconds: 120),
+              child: Transform.translate(
+                offset: const Offset(0, 24),
+                child: Text(
+                  widget.label,
+                  style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                        color: const Color(0xFF4F3B12),
+                        fontFamily: kFeiHuaSongTiFontFamily,
+                        fontWeight: FontWeight.w700,
+                        fontSize: 18,
+                        height: 1,
+                      ),
+                ),
+              ),
             ),
-          ),
-          child: InkWell(
-            onTap: onTap,
-            child: Stack(
-              alignment: Alignment.center,
-              children: [
-                Positioned(
-                  right: -14,
-                  bottom: -12,
-                  child: Icon(
-                    icon,
-                    size: 118,
-                    color: accentColor.withOpacity(0.11),
-                  ),
-                ),
-                Positioned.fill(
-                  child: CustomPaint(
-                    painter: _TileFiberPainter(accentColor: accentColor),
-                  ),
-                ),
-                Text(
-                  title,
-                  textAlign: TextAlign.center,
-                  style: theme.textTheme.headlineSmall?.copyWith(
-                    color: const Color(0xFF4F3B12),
-                    fontFamily: kFeiHuaSongTiFontFamily,
-                    fontWeight: FontWeight.w700,
-                    fontSize: 26,
-                    height: 1,
-                  ),
-                ),
-              ],
+            _HomeDockIcon(
+              icon: widget.icon,
+              assetPath: widget.assetPath,
+              assetSize: widget.assetSize,
             ),
-          ),
+          ],
         ),
       ),
     );
   }
 }
 
-class _TileFiberPainter extends CustomPainter {
-  const _TileFiberPainter({required this.accentColor});
+class _HomeDockIcon extends StatelessWidget {
+  const _HomeDockIcon({
+    required this.icon,
+    required this.assetPath,
+    required this.assetSize,
+  });
 
-  final Color accentColor;
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    final paint = Paint()
-      ..color = const Color(0xFFE8DDAE).withOpacity(0.26)
-      ..strokeWidth = 0.6;
-    canvas.drawLine(
-      Offset(size.width * 0.13, size.height * 0.22),
-      Offset(size.width * 0.82, size.height * 0.18),
-      paint,
-    );
-    canvas.drawLine(
-      Offset(size.width * 0.18, size.height * 0.78),
-      Offset(size.width * 0.88, size.height * 0.74),
-      paint,
-    );
-
-    HuiyunCloudArt.drawRibbonCloud(
-      canvas,
-      center: Offset(size.width * 0.50, size.height * 0.53),
-      width: size.width * 0.56,
-      color: accentColor,
-      opacity: 0.11,
-      strokeWidth: 0.9,
-    );
-  }
+  final IconData? icon;
+  final String? assetPath;
+  final double assetSize;
 
   @override
-  bool shouldRepaint(covariant _TileFiberPainter oldDelegate) {
-    return oldDelegate.accentColor != accentColor;
+  Widget build(BuildContext context) {
+    final imagePath = assetPath;
+    if (imagePath != null) {
+      return SizedBox(
+        width: assetSize,
+        height: assetSize,
+        child: Image.asset(
+          imagePath,
+          fit: BoxFit.contain,
+          filterQuality: FilterQuality.high,
+        ),
+      );
+    }
+    return Icon(
+      icon,
+      color: const Color(0xFF5B431B),
+      size: 34,
+    );
   }
+}
+
+List<String> _homeDisplayLines(String content) {
+  return content
+      .split(RegExp(r'[\r\n]+'))
+      .map(_stripDisplayPunctuation)
+      .where((line) => line.isNotEmpty)
+      .toList(growable: false);
+}
+
+String _stripDisplayPunctuation(String value) {
+  return value.replaceAll(
+    RegExp(r'[\s　，。、“”‘’：；！？《》（）()【】\[\]「」『』,.!?;:·…—-]'),
+    '',
+  );
 }
 
 class _JinshiDiamond extends StatelessWidget {

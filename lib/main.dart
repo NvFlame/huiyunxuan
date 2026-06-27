@@ -375,31 +375,6 @@ class _HuiyunBackdropPainter extends CustomPainter {
       canvas.drawLine(Offset(x, 0), Offset(x + 10, size.height), paperLine);
     }
 
-    HuiyunCloudArt.drawCloudWash(
-      canvas,
-      center: Offset(size.width * 0.78, size.height * 0.15),
-      width: size.shortestSide * 0.50,
-      color: const Color(0xFFD1A84F),
-      opacity: 0.045,
-      mirror: true,
-    );
-    HuiyunCloudArt.drawRibbonCloud(
-      canvas,
-      center: Offset(size.width * 0.74, size.height * 0.16),
-      width: size.shortestSide * 0.42,
-      color: const Color(0xFFC7A65D),
-      opacity: 0.11,
-      strokeWidth: 1.1,
-      mirror: true,
-    );
-    HuiyunCloudArt.drawRibbonCloud(
-      canvas,
-      center: Offset(size.width * 0.22, size.height * 0.44),
-      width: size.shortestSide * 0.34,
-      color: const Color(0xFF8E9278),
-      opacity: 0.07,
-      strokeWidth: 1.0,
-    );
     final mist = Paint()
       ..shader = RadialGradient(
         colors: [

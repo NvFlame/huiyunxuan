@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'dart:math';
+import 'dart:typed_data';
 
 import 'package:flutter/services.dart';
 import 'package:path/path.dart' as p;
@@ -1583,6 +1584,32 @@ ORDER BY cp.sort_order ASC, cp.created_at ASC, pe.title ASC
     return rows.map(Poem.fromMap).toList();
   }
 
+  Future<Poem?> getRandomHomeDisplayPoem() async {
+    final db = await database;
+    final supportedCodePoints = await _loadSanjiXingKaiCodePoints();
+    final rows = await db.rawQuery(
+      '''
+SELECT pe.*, COALESCE(MIN(cp.collection_id), 0) AS collection_id
+FROM poem_elements pe
+LEFT JOIN collection_poems cp ON cp.poem_id = pe.id
+GROUP BY pe.id
+''',
+    );
+    final candidates = rows
+        .map(Poem.fromMap)
+        .where(_isHomeDisplayPoem)
+        .where(
+          (poem) => supportedCodePoints.isEmpty
+              ? true
+              : _isHomeDisplayPoemFontSupported(poem, supportedCodePoints),
+        )
+        .toList(growable: false);
+    if (candidates.isEmpty) {
+      return null;
+    }
+    return candidates[Random().nextInt(candidates.length)];
+  }
+
   Future<List<DuplicatePoemCandidate>> findPotentialDuplicatePoems({
     required String author,
     required String content,
@@ -2066,6 +2093,193 @@ List<int> _uniqueIntsInOrder(Iterable<int> values) {
     }
   }
   return result;
+}
+
+bool _isHomeDisplayPoem(Poem poem) {
+  final lines = _homeDisplayPoemLines(poem.content);
+  if (lines.length != 4) {
+    return false;
+  }
+  final lineLength = lines.first.runes.length;
+  if (lineLength != 5 && lineLength != 7) {
+    return false;
+  }
+  return lines.every((line) => line.runes.length == lineLength);
+}
+
+bool _isHomeDisplayPoemFontSupported(
+  Poem poem,
+  Set<int> supportedCodePoints,
+) {
+  final displayText = [
+    ..._homeDisplayPoemLines(poem.content),
+    _stripPoemPunctuation(poem.title),
+  ].join();
+  return displayText.runes.every(supportedCodePoints.contains);
+}
+
+List<String> _homeDisplayPoemLines(String content) {
+  return content
+      .split(RegExp(r'[\r\n]+'))
+      .map(_stripPoemPunctuation)
+      .where((line) => line.isNotEmpty)
+      .toList(growable: false);
+}
+
+String _stripPoemPunctuation(String value) {
+  return value.replaceAll(
+    RegExp(r'[\s　，。、“”‘’：；！？《》（）()【】\[\]「」『』,.!?;:·…—-]'),
+    '',
+  );
+}
+
+Set<int>? _sanjiXingKaiCodePointsCache;
+
+Future<Set<int>> _loadSanjiXingKaiCodePoints() async {
+  final cached = _sanjiXingKaiCodePointsCache;
+  if (cached != null) {
+    return cached;
+  }
+  try {
+    final data = await rootBundle.load('sanji-xk.ttf');
+    final codePoints = _parseFontCodePoints(data);
+    _sanjiXingKaiCodePointsCache = codePoints;
+    return codePoints;
+  } catch (_) {
+    _sanjiXingKaiCodePointsCache = const <int>{};
+    return const <int>{};
+  }
+}
+
+Set<int> _parseFontCodePoints(ByteData data) {
+  final tableCount = data.getUint16(4);
+  int? cmapOffset;
+  for (var i = 0; i < tableCount; i += 1) {
+    final recordOffset = 12 + i * 16;
+    final tag = String.fromCharCodes([
+      data.getUint8(recordOffset),
+      data.getUint8(recordOffset + 1),
+      data.getUint8(recordOffset + 2),
+      data.getUint8(recordOffset + 3),
+    ]);
+    if (tag == 'cmap') {
+      cmapOffset = data.getUint32(recordOffset + 8);
+      break;
+    }
+  }
+  if (cmapOffset == null) {
+    return const <int>{};
+  }
+
+  final subtableCount = data.getUint16(cmapOffset + 2);
+  final subtables = <_FontCmapSubtable>[];
+  for (var i = 0; i < subtableCount; i += 1) {
+    final recordOffset = cmapOffset + 4 + i * 8;
+    final platformId = data.getUint16(recordOffset);
+    final encodingId = data.getUint16(recordOffset + 2);
+    final offset = cmapOffset + data.getUint32(recordOffset + 4);
+    final format = data.getUint16(offset);
+    subtables.add(
+      _FontCmapSubtable(
+        platformId: platformId,
+        encodingId: encodingId,
+        offset: offset,
+        format: format,
+      ),
+    );
+  }
+  subtables.sort((a, b) => b.score.compareTo(a.score));
+
+  for (final subtable in subtables) {
+    final codePoints = switch (subtable.format) {
+      4 => _parseCmapFormat4(data, subtable.offset),
+      12 => _parseCmapFormat12(data, subtable.offset),
+      _ => const <int>{},
+    };
+    if (codePoints.isNotEmpty) {
+      return codePoints;
+    }
+  }
+  return const <int>{};
+}
+
+Set<int> _parseCmapFormat4(ByteData data, int offset) {
+  final segCount = data.getUint16(offset + 6) ~/ 2;
+  final endCodesOffset = offset + 14;
+  final startCodesOffset = endCodesOffset + segCount * 2 + 2;
+  final idDeltasOffset = startCodesOffset + segCount * 2;
+  final idRangeOffsetsOffset = idDeltasOffset + segCount * 2;
+  final codePoints = <int>{};
+
+  for (var i = 0; i < segCount; i += 1) {
+    final endCode = data.getUint16(endCodesOffset + i * 2);
+    final startCode = data.getUint16(startCodesOffset + i * 2);
+    final idDelta = data.getInt16(idDeltasOffset + i * 2);
+    final idRangeOffsetPosition = idRangeOffsetsOffset + i * 2;
+    final idRangeOffset = data.getUint16(idRangeOffsetPosition);
+    if (startCode == 0xFFFF && endCode == 0xFFFF) {
+      continue;
+    }
+    for (var codePoint = startCode; codePoint <= endCode; codePoint += 1) {
+      var glyphId = 0;
+      if (idRangeOffset == 0) {
+        glyphId = (codePoint + idDelta) & 0xFFFF;
+      } else {
+        final glyphIndexOffset =
+            idRangeOffsetPosition + idRangeOffset + (codePoint - startCode) * 2;
+        if (glyphIndexOffset + 1 >= data.lengthInBytes) {
+          continue;
+        }
+        glyphId = data.getUint16(glyphIndexOffset);
+        if (glyphId != 0) {
+          glyphId = (glyphId + idDelta) & 0xFFFF;
+        }
+      }
+      if (glyphId != 0) {
+        codePoints.add(codePoint);
+      }
+    }
+  }
+  return codePoints;
+}
+
+Set<int> _parseCmapFormat12(ByteData data, int offset) {
+  final groupCount = data.getUint32(offset + 12);
+  final codePoints = <int>{};
+  for (var i = 0; i < groupCount; i += 1) {
+    final groupOffset = offset + 16 + i * 12;
+    final startCode = data.getUint32(groupOffset);
+    final endCode = data.getUint32(groupOffset + 4);
+    for (var codePoint = startCode; codePoint <= endCode; codePoint += 1) {
+      codePoints.add(codePoint);
+    }
+  }
+  return codePoints;
+}
+
+class _FontCmapSubtable {
+  const _FontCmapSubtable({
+    required this.platformId,
+    required this.encodingId,
+    required this.offset,
+    required this.format,
+  });
+
+  final int platformId;
+  final int encodingId;
+  final int offset;
+  final int format;
+
+  int get score {
+    final formatScore = switch (format) {
+      12 => 400,
+      4 => 300,
+      _ => 0,
+    };
+    final platformScore = platformId == 3 ? 40 : 0;
+    final encodingScore = encodingId == 10 ? 20 : encodingId == 1 ? 10 : 0;
+    return formatScore + platformScore + encodingScore;
+  }
 }
 
 int _intFromMap(Object? value) {

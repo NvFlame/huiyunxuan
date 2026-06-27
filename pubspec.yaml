@@ -67,6 +67,7 @@ flutter:
     - assets/data/tang_poems_300.json
     - assets/branding/home_title.png
     - assets/branding/cloud_mark.png
+    - assets/home_icons/
     - assets/training_stamps/
     - assets/time_covers/
 

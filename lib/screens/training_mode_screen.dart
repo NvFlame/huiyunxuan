@@ -1124,6 +1124,7 @@ class _TrainingModeScreenState extends State<TrainingModeScreen> {
             values: TrainingDifficulty.values,
             selected: _difficulty,
             labelBuilder: (difficulty) => difficulty.label,
+            compact: true,
             onSelected: (difficulty) {
               unawaited(_setDifficulty(difficulty));
             },
@@ -1744,12 +1745,14 @@ class _TrainingChoiceGroup<T> extends StatelessWidget {
     required this.selected,
     required this.labelBuilder,
     required this.onSelected,
+    this.compact = false,
   });
 
   final List<T> values;
   final T selected;
   final String Function(T value) labelBuilder;
   final ValueChanged<T> onSelected;
+  final bool compact;
 
   @override
   Widget build(BuildContext context) {
@@ -1761,6 +1764,7 @@ class _TrainingChoiceGroup<T> extends StatelessWidget {
           _TrainingChoiceTile(
             label: labelBuilder(value),
             selected: value == selected,
+            compact: compact,
             onTap: () => onSelected(value),
           ),
       ],
@@ -1773,11 +1777,13 @@ class _TrainingChoiceTile extends StatelessWidget {
     required this.label,
     required this.selected,
     required this.onTap,
+    this.compact = false,
   });
 
   final String label;
   final bool selected;
   final VoidCallback onTap;
+  final bool compact;
 
   @override
   Widget build(BuildContext context) {
@@ -1795,8 +1801,11 @@ class _TrainingChoiceTile extends StatelessWidget {
         child: AnimatedContainer(
           duration: const Duration(milliseconds: 180),
           curve: Curves.easeOutCubic,
-          constraints: const BoxConstraints(minWidth: 72),
-          padding: const EdgeInsets.symmetric(horizontal: 15, vertical: 9),
+          constraints: BoxConstraints(minWidth: compact ? 56 : 72),
+          padding: EdgeInsets.symmetric(
+            horizontal: compact ? 11 : 15,
+            vertical: 9,
+          ),
           decoration: BoxDecoration(
             color: selected
                 ? const Color(0xFFF2D68B).withOpacity(0.88)

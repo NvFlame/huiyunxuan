@@ -383,15 +383,6 @@ class _HuiyunCornerPainter extends CustomPainter {
     corner(Offset(size.width - radius, size.height - radius), -1, -1);
 
     if (size.width >= 140 && size.height >= 64) {
-      HuiyunCloudArt.drawRibbonCloud(
-        canvas,
-        center: Offset(size.width - 54, size.height - 26),
-        width: math.min(size.width * 0.26, 92),
-        color: color,
-        opacity: 0.46,
-        strokeWidth: 0.7,
-        mirror: true,
-      );
     }
   }
 
