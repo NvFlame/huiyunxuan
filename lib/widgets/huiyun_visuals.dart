@@ -73,14 +73,37 @@ class HuiyunPaperCard extends StatelessWidget {
             borderRadius: BorderRadius.circular(radius),
             onTap: onTap,
             onLongPress: onLongPress,
-            child: CustomPaint(
-              painter: _HuiyunCornerPainter(
-                color: borderColor.withOpacity(selected ? 0.58 : 0.36),
-                radius: radius,
-              ),
-              child: Padding(
-                padding: padding,
-                child: child,
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(radius),
+              child: Stack(
+                children: [
+                  Positioned(
+                    right: -38,
+                    bottom: -42,
+                    child: IgnorePointer(
+                      child: Opacity(
+                        opacity: selected ? 0.11 : 0.075,
+                        child: Image.asset(
+                          'assets/branding/cloud_mark.png',
+                          width: 138,
+                          fit: BoxFit.contain,
+                          color: HuiyunPalette.goldDeep,
+                          colorBlendMode: BlendMode.srcIn,
+                        ),
+                      ),
+                    ),
+                  ),
+                  CustomPaint(
+                    painter: _HuiyunCornerPainter(
+                      color: borderColor.withOpacity(selected ? 0.58 : 0.36),
+                      radius: radius,
+                    ),
+                    child: Padding(
+                      padding: padding,
+                      child: child,
+                    ),
+                  ),
+                ],
               ),
             ),
           ),

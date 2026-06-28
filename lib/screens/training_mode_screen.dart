@@ -2063,52 +2063,87 @@ class _ExerciseView extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final poemTextStyle = theme.textTheme.titleMedium?.copyWith(
+      height: 1.8,
+      color: const Color(0xFF2F2510),
+      fontFamily: kSongTiFontFamily,
+      fontFamilyFallback: kSongTiFontFallback,
+      fontWeight: FontWeight.w700,
+    );
 
-    return DecoratedBox(
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: const Color(0xFFEEDC9A)),
-      ),
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(14, 16, 14, 16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(8),
+      child: DecoratedBox(
+        decoration: BoxDecoration(
+          gradient: LinearGradient(
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+            colors: [
+              Colors.white.withOpacity(0.92),
+              HuiyunPalette.paper,
+              HuiyunPalette.paperWarm.withOpacity(0.58),
+            ],
+            stops: const [0, 0.58, 1],
+          ),
+          borderRadius: BorderRadius.circular(8),
+          border: Border.all(color: const Color(0xFFEEDC9A)),
+        ),
+        child: Stack(
           children: [
-            for (final line in exercise.lines)
-              Padding(
-                padding: const EdgeInsets.symmetric(vertical: 6),
-                child: Wrap(
-                  crossAxisAlignment: WrapCrossAlignment.center,
-                  runSpacing: 8,
-                  children: [
-                    for (final run in _groupExerciseTokens(line.tokens))
-                      Row(
-                        mainAxisSize: MainAxisSize.min,
-                        crossAxisAlignment: CrossAxisAlignment.center,
-                        children: [
-                          for (final token in run)
-                            if (token.blankId == null)
-                              Text(
-                                token.text,
-                                style: theme.textTheme.titleMedium?.copyWith(
-                                  height: 1.8,
-                                  color: const Color(0xFF2F2510),
-                                ),
-                              )
-                            else
-                              _AnswerBlank(
-                                blank: exercise.blanks[token.blankId]!,
-                                controller: controllers[token.blankId]!,
-                                focusNode: focusNodes[token.blankId]!,
-                                onSubmitted: onSubmitBlank,
-                                onChanged: onEditedBlank,
-                              ),
-                        ],
-                      ),
-                  ],
+            Positioned(
+              right: -38,
+              bottom: -42,
+              child: IgnorePointer(
+                child: Opacity(
+                  opacity: 0.075,
+                  child: Image.asset(
+                    'assets/branding/cloud_mark.png',
+                    width: 138,
+                    fit: BoxFit.contain,
+                    color: HuiyunPalette.goldDeep,
+                    colorBlendMode: BlendMode.srcIn,
+                  ),
                 ),
               ),
+            ),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(14, 16, 14, 16),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  for (final line in exercise.lines)
+                    Padding(
+                      padding: const EdgeInsets.symmetric(vertical: 6),
+                      child: Wrap(
+                        crossAxisAlignment: WrapCrossAlignment.center,
+                        runSpacing: 8,
+                        children: [
+                          for (final run in _groupExerciseTokens(line.tokens))
+                            Row(
+                              mainAxisSize: MainAxisSize.min,
+                              crossAxisAlignment: CrossAxisAlignment.center,
+                              children: [
+                                for (final token in run)
+                                  if (token.blankId == null)
+                                    Text(token.text, style: poemTextStyle)
+                                  else
+                                    _AnswerBlank(
+                                      blank: exercise.blanks[token.blankId]!,
+                                      controller:
+                                          controllers[token.blankId]!,
+                                      focusNode: focusNodes[token.blankId]!,
+                                      textStyle: poemTextStyle,
+                                      onSubmitted: onSubmitBlank,
+                                      onChanged: onEditedBlank,
+                                    ),
+                              ],
+                            ),
+                        ],
+                      ),
+                    ),
+                ],
+              ),
+            ),
           ],
         ),
       ),
@@ -2121,6 +2156,7 @@ class _AnswerBlank extends StatelessWidget {
     required this.blank,
     required this.controller,
     required this.focusNode,
+    required this.textStyle,
     required this.onSubmitted,
     required this.onChanged,
   });
@@ -2128,21 +2164,14 @@ class _AnswerBlank extends StatelessWidget {
   final _TrainingBlank blank;
   final TextEditingController controller;
   final FocusNode focusNode;
+  final TextStyle? textStyle;
   final ValueChanged<int> onSubmitted;
   final ValueChanged<int> onChanged;
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
     if (blank.status == _BlankStatus.correct) {
-      return Text(
-        blank.revealText,
-        style: theme.textTheme.titleMedium?.copyWith(
-          height: 1.8,
-          color: const Color(0xFF2F2510),
-          fontWeight: FontWeight.w600,
-        ),
-      );
+      return Text(blank.revealText, style: textStyle);
     }
 
     final width = _blankWidth(blank.revealText);
@@ -2156,9 +2185,8 @@ class _AnswerBlank extends StatelessWidget {
         textAlign: TextAlign.center,
         textInputAction: TextInputAction.done,
         keyboardType: TextInputType.text,
-        style: theme.textTheme.titleMedium?.copyWith(
+        style: textStyle?.copyWith(
           color: isWrong ? Colors.red.shade700 : const Color(0xFF2F2510),
-          fontWeight: FontWeight.w600,
         ),
         decoration: InputDecoration(
           isDense: true,
